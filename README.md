@@ -1,6 +1,6 @@
 
 # LifeSync 📚⌚📊
-### Your College Life, All in One Place!
+### Your College Life, All in One Place! 😁✨
 
 ## About the Project
 
