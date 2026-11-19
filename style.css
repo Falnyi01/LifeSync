@@ -50,6 +50,79 @@ select {
   box-shadow: 0 10px 24px var(--shadow);
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-link,
+.auth-back-link {
+  color: #dbeafe;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.account-link {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-card {
+  width: min(100%, 440px);
+  background: rgba(17, 24, 39, 0.95);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 10px 24px var(--shadow);
+}
+
+.auth-card h1 {
+  margin-bottom: 8px;
+}
+
+.auth-intro {
+  color: var(--muted);
+  margin: 0 0 22px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 16px;
+}
+
+.auth-form small {
+  color: var(--muted);
+}
+
+.auth-message {
+  min-height: 20px;
+  margin: 0;
+  font-weight: 700;
+}
+
+.auth-message.error {
+  color: #fecaca;
+}
+
+.auth-message.success {
+  color: #bbf7d0;
+}
+
+.auth-back-link {
+  display: inline-block;
+  margin-top: 18px;
+}
+
 .eyebrow {
   margin: 0 0 6px;
   font-size: 0.75rem;
