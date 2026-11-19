@@ -125,6 +125,11 @@ dist
 # Stores Visual Studio Code versions used for testing Visual Studio Code extensions
 .vscode-test
 
+# Local SQLite databases
+database/*.db
+database/*.db-shm
+database/*.db-wal
+
 # pnpm
 .pnpm-store
 

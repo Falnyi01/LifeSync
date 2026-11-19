@@ -1,0 +1,13 @@
+{
+  "name": "lifesync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LifeSync college planning web application",
+  "scripts": {
+    "init-db": "node scripts/init-db.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "sqlite3": "^5.1.7"
+  }
+}
