@@ -34,8 +34,6 @@ LifeSync aims to simplify student life by bringing these responsibilities togeth
 
 ## Project Status
 
-LifeSync is currently in the **planning and early development stage**.
-
 This README will be updated as the project progresses.
 
 ## 🚀 Features & Progress
