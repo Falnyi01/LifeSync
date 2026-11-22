@@ -38,5 +38,31 @@ LifeSync is currently in the **planning and early development stage**.
 
 This README will be updated as the project progresses.
 
+## 🚀 Features & Progress
+
+### User Management
+- [x] User account registration
+- [] User login
+- [ ] User logout
+
+### Semester & Class Management
+- [ ] Create and manage semesters
+- [ ] Add and manage classes
+- [ ] Generate class schedules
+
+### Assignment & Task Tracking
+- [ ] Create and manage assignments
+- [ ] Track personal tasks
+
+### Calendar & Time Tracking
+- [ ] View class schedules and deadlines
+- [ ] Track work and study hours
+
+### Budget & Analytics
+- [ ] Record income and expenses
+- [ ] View spending summaries and charts
+
+*Features are updated as development progresses.*
+
 ---
 
