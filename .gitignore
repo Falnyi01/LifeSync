@@ -129,6 +129,7 @@ dist
 database/*.db
 database/*.db-shm
 database/*.db-wal
+database/session-secret
 
 # pnpm
 .pnpm-store
