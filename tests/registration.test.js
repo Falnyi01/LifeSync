@@ -13,10 +13,12 @@ let baseUrl;
 let testDirectory;
 
 const previousDatabasePath = process.env.LIFESYNC_DATABASE_PATH;
+const previousSessionSecret = process.env.SESSION_SECRET;
 
 before(async () => {
   testDirectory = await mkdtemp(path.join(os.tmpdir(), "lifesync-tests-"));
   process.env.LIFESYNC_DATABASE_PATH = path.join(testDirectory, "test.db");
+  process.env.SESSION_SECRET = "registration-test-session-secret";
 
   ({ app } = require("../server"));
   ({ database, initializeDatabase } = require("../database/database"));
@@ -49,6 +51,12 @@ after(async () => {
     delete process.env.LIFESYNC_DATABASE_PATH;
   } else {
     process.env.LIFESYNC_DATABASE_PATH = previousDatabasePath;
+  }
+
+  if (previousSessionSecret === undefined) {
+    delete process.env.SESSION_SECRET;
+  } else {
+    process.env.SESSION_SECRET = previousSessionSecret;
   }
 
   if (testDirectory) {
