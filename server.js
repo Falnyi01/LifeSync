@@ -91,6 +91,8 @@ app.use(session({
 }));
 
 function requireLogin(request, response, next) {
+  response.set("Cache-Control", "no-store");
+
   if (!request.session.userId) {
     return response.redirect("/login.html");
   }

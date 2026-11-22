@@ -1641,7 +1641,7 @@ function bindLogoutButton() {
         return;
       }
 
-      window.location.assign("/login.html");
+      window.location.replace("/login.html");
     } catch (error) {
       console.error("Logout request failed:", error);
       alert("Could not connect to LifeSync. Please try again.");
