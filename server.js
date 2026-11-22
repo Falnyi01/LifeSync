@@ -90,11 +90,19 @@ app.use(session({
   }
 }));
 
-app.get("/", (request, response) => {
+function requireLogin(request, response, next) {
+  if (!request.session.userId) {
+    return response.redirect("/login.html");
+  }
+
+  return next();
+}
+
+app.get("/", requireLogin, (request, response) => {
   response.sendFile(path.join(__dirname, "index.html"));
 });
 
-app.get("/index.html", (request, response) => {
+app.get("/index.html", requireLogin, (request, response) => {
   response.sendFile(path.join(__dirname, "index.html"));
 });
 
