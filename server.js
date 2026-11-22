@@ -1,13 +1,94 @@
 const crypto = require("node:crypto");
+const fs = require("node:fs");
 const path = require("node:path");
 const { promisify } = require("node:util");
 const express = require("express");
+const session = require("express-session");
+const SQLiteStore = require("connect-sqlite3")(session);
 const { database, initializeDatabase } = require("./database/database");
 
 const app = express();
 const scrypt = promisify(crypto.scrypt);
+const sessionStore = new SQLiteStore({
+  db: database,
+  table: "sessions"
+});
+
+function getSessionSecret() {
+  if (process.env.SESSION_SECRET) {
+    return process.env.SESSION_SECRET;
+  }
+
+  const secretPath = path.join(__dirname, "database", "session-secret");
+
+  try {
+    const savedSecret = fs.readFileSync(secretPath, "utf8").trim();
+    if (savedSecret) {
+      return savedSecret;
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  const newSecret = crypto.randomBytes(32).toString("hex");
+
+  try {
+    fs.writeFileSync(secretPath, newSecret, { encoding: "utf8", flag: "wx" });
+    return newSecret;
+  } catch (error) {
+    if (error.code !== "EEXIST") {
+      throw error;
+    }
+
+    const savedSecret = fs.readFileSync(secretPath, "utf8").trim();
+    if (!savedSecret) {
+      throw new Error("The LifeSync session secret file is empty.");
+    }
+    return savedSecret;
+  }
+}
+
+function verifyPassword(password, storedHash) {
+  const match = /^scrypt\$([a-f0-9]{32})\$([a-f0-9]{128})$/.exec(storedHash);
+  if (!match) {
+    return Promise.resolve(false);
+  }
+
+  const salt = Buffer.from(match[1], "hex");
+  const expectedHash = Buffer.from(match[2], "hex");
+
+  return scrypt(password, salt, expectedHash.length).then((actualHash) =>
+    crypto.timingSafeEqual(actualHash, expectedHash)
+  );
+}
+
+function regenerateSession(currentSession) {
+  return new Promise((resolve, reject) => {
+    currentSession.regenerate((error) => error ? reject(error) : resolve());
+  });
+}
+
+function saveSession(currentSession) {
+  return new Promise((resolve, reject) => {
+    currentSession.save((error) => error ? reject(error) : resolve());
+  });
+}
 
 app.use(express.json({ limit: "10kb" }));
+app.use(session({
+  store: sessionStore,
+  secret: getSessionSecret(),
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 24 * 60 * 60 * 1000
+  }
+}));
 
 app.get("/", (request, response) => {
   response.sendFile(path.join(__dirname, "index.html"));
@@ -21,6 +102,10 @@ app.get("/register.html", (request, response) => {
   response.sendFile(path.join(__dirname, "register.html"));
 });
 
+app.get("/login.html", (request, response) => {
+  response.sendFile(path.join(__dirname, "login.html"));
+});
+
 app.get("/style.css", (request, response) => {
   response.sendFile(path.join(__dirname, "style.css"));
 });
@@ -31,6 +116,10 @@ app.get("/script.js", (request, response) => {
 
 app.get("/register.js", (request, response) => {
   response.sendFile(path.join(__dirname, "register.js"));
+});
+
+app.get("/login.js", (request, response) => {
+  response.sendFile(path.join(__dirname, "login.js"));
 });
 
 app.post("/api/register", async (request, response) => {
@@ -87,6 +176,52 @@ app.post("/api/register", async (request, response) => {
   }
 });
 
+app.post("/api/login", async (request, response) => {
+  const body = request.body && typeof request.body === "object" ? request.body : {};
+  const email = typeof body.email === "string"
+    ? body.email.trim().toLowerCase()
+    : "";
+  const password = typeof body.password === "string" ? body.password : "";
+
+  if (!email || !password) {
+    return response.status(400).json({ message: "Enter your email and password." });
+  }
+
+  if (
+    email.length > 254 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+    password.length > 128
+  ) {
+    return response.status(400).json({ message: "Enter a valid email and password." });
+  }
+
+  try {
+    const user = await new Promise((resolve, reject) => {
+      database.get(
+        "SELECT id, name, password_hash FROM users WHERE email = ?",
+        [email],
+        (error, row) => error ? reject(error) : resolve(row)
+      );
+    });
+
+    if (!user || !(await verifyPassword(password, user.password_hash))) {
+      return response.status(401).json({ message: "Email or password is incorrect." });
+    }
+
+    await regenerateSession(request.session);
+    request.session.userId = user.id;
+    await saveSession(request.session);
+
+    return response.json({
+      message: "Login successful.",
+      name: user.name
+    });
+  } catch (error) {
+    console.error("Account login failed:", error);
+    return response.status(500).json({ message: "Unable to log in right now." });
+  }
+});
+
 app.use((error, request, response, next) => {
   if (response.headersSent) {
     return next(error);
@@ -117,4 +252,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, startServer };
+module.exports = { app, startServer, sessionStore };
