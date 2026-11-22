@@ -9,7 +9,9 @@
     "init-db": "node scripts/init-db.js"
   },
   "dependencies": {
+    "connect-sqlite3": "^0.9.18",
     "express": "^5.1.0",
+    "express-session": "^1.19.0",
     "sqlite3": "^5.1.7"
   }
 }
