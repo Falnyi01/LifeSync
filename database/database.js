@@ -1,7 +1,8 @@
 const path = require("node:path");
 const sqlite3 = require("sqlite3").verbose();
 
-const databasePath = path.join(__dirname, "lifesync.db");
+const databasePath = process.env.LIFESYNC_DATABASE_PATH
+  || path.join(__dirname, "lifesync.db");
 const database = new sqlite3.Database(databasePath);
 
 function initializeDatabase() {

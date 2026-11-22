@@ -4,6 +4,7 @@
   "private": true,
   "description": "LifeSync college planning web application",
   "scripts": {
+    "test": "node --test",
     "start": "node server.js",
     "init-db": "node scripts/init-db.js"
   },
