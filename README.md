@@ -42,7 +42,7 @@ This README will be updated as the project progresses.
 
 ### User Management
 - [x] User account registration
-- [] User login
+- [ ] User login
 - [ ] User logout
 
 ### Semester & Class Management
