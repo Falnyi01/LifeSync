@@ -1625,6 +1625,32 @@ function bindTodoControls() {
   }
 }
 
+function bindLogoutButton() {
+  const logoutButton = document.getElementById("logout-button");
+  if (!logoutButton) return;
+
+  logoutButton.addEventListener("click", async () => {
+    logoutButton.disabled = true;
+
+    try {
+      const response = await fetch("/api/logout", { method: "POST" });
+      const result = await response.json();
+
+      if (!response.ok) {
+        alert(result.message || "Could not log out. Please try again.");
+        return;
+      }
+
+      window.location.assign("/login.html");
+    } catch (error) {
+      console.error("Logout request failed:", error);
+      alert("Could not connect to LifeSync. Please try again.");
+    } finally {
+      logoutButton.disabled = false;
+    }
+  });
+}
+
 function init() {
   state.events = loadEvents();
   state.categories = loadCategories();
@@ -1636,6 +1662,7 @@ function init() {
   state.weekStart = getStartOfWeek(new Date());
   renderCurrentDateLabel();
   bindTabs();
+  bindLogoutButton();
   bindCalendarControls();
   bindEventForm();
   bindWeekPicker();
