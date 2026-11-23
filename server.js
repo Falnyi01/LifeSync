@@ -277,6 +277,7 @@ function getTaskDetails(body) {
 
 function toTodoItem(task) {
   const isAssignment = task.itemType === "assignment";
+  const completedAt = task.completedAt || null;
 
   return {
     id: task.id,
@@ -291,7 +292,9 @@ function toTodoItem(task) {
     reminderDays: isAssignment ? task.reminderDays : 0,
     reminderDate: isAssignment ? task.reminderDate : null,
     classId: isAssignment ? task.classId : null,
-    className: isAssignment ? task.className || "" : ""
+    className: isAssignment ? task.className || "" : "",
+    isCompleted: Boolean(completedAt),
+    completedAt
   };
 }
 
@@ -313,6 +316,23 @@ function findClassForUser(userId, classId) {
       "SELECT id, name FROM classes WHERE id = ? AND user_id = ?",
       [classId, userId],
       (error, classRecord) => error ? reject(error) : resolve(classRecord || null)
+    );
+  });
+}
+
+function findTaskForUser(userId, taskId) {
+  return new Promise((resolve, reject) => {
+    database.get(
+      `SELECT t.id, t.item_type AS itemType, t.title, t.notes,
+              t.task_date AS taskDate, t.due_date AS dueDate,
+              t.due_time AS dueTime, t.reminder_days AS reminderDays,
+              t.reminder_date AS reminderDate, t.class_id AS classId,
+              t.completed_at AS completedAt, c.name AS className
+       FROM tasks t
+       LEFT JOIN classes c ON c.id = t.class_id AND c.user_id = t.user_id
+       WHERE t.id = ? AND t.user_id = ?`,
+      [taskId, userId],
+      (error, task) => error ? reject(error) : resolve(task || null)
     );
   });
 }
@@ -597,6 +617,7 @@ app.get("/api/tasks", requireApiLogin, async (request, response) => {
                 t.task_date AS taskDate, t.due_date AS dueDate,
                 t.due_time AS dueTime, t.reminder_days AS reminderDays,
                 t.reminder_date AS reminderDate, t.class_id AS classId,
+                t.completed_at AS completedAt,
                 c.name AS className
          FROM tasks t
          LEFT JOIN classes c ON c.id = t.class_id AND c.user_id = t.user_id
@@ -724,13 +745,69 @@ app.put("/api/tasks/:id", requireApiLogin, async (request, response) => {
       return response.status(404).json({ message: "Task not found." });
     }
 
+    const savedTask = await findTaskForUser(request.session.userId, id);
+    if (!savedTask) {
+      return response.status(404).json({ message: "Task not found." });
+    }
+
     return response.json({
       message: "Task updated successfully.",
-      task: toTodoItem({ id, ...details, className: classRecord ? classRecord.name : "" })
+      task: toTodoItem(savedTask)
     });
   } catch (error) {
     console.error("Task update failed:", error);
     return response.status(500).json({ message: "Unable to update the task right now." });
+  }
+});
+
+app.patch("/api/tasks/:id/status", requireApiLogin, async (request, response) => {
+  const id = getPositiveId(request.params.id);
+  const isCompleted = request.body && request.body.isCompleted;
+  if (!id) {
+    return response.status(400).json({ message: "Enter a valid task ID." });
+  }
+  if (typeof isCompleted !== "boolean") {
+    return response.status(400).json({ message: "Choose whether the task is complete." });
+  }
+
+  try {
+    const changes = await new Promise((resolve, reject) => {
+      database.run(
+        `UPDATE tasks
+         SET completed_at = CASE
+               WHEN ? = 1 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+               ELSE NULL
+             END,
+             updated_at = datetime('now')
+         WHERE id = ? AND user_id = ?`,
+        [isCompleted ? 1 : 0, id, request.session.userId],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.changes);
+        }
+      );
+    });
+
+    if (!changes) {
+      return response.status(404).json({ message: "Task not found." });
+    }
+
+    const task = await findTaskForUser(request.session.userId, id);
+    if (!task) {
+      return response.status(404).json({ message: "Task not found." });
+    }
+
+    return response.json({
+      message: isCompleted ? "Task marked complete." : "Task marked incomplete.",
+      task: toTodoItem(task)
+    });
+  } catch (error) {
+    console.error("Task status update failed:", error);
+    return response.status(500).json({ message: "Unable to update task status right now." });
   }
 });
 

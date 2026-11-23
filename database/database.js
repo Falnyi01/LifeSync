@@ -19,6 +19,7 @@ function createTasksTable(callback) {
       reminder_days INTEGER NOT NULL DEFAULT 0 CHECK (reminder_days BETWEEN 0 AND 30),
       reminder_date TEXT,
       class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL,
+      completed_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -40,14 +41,30 @@ function createTasksTable(callback) {
           return;
         }
 
+        const ensureCompletedColumn = () => {
+          if (columns.some((column) => column.name === "completed_at")) {
+            callback(null);
+            return;
+          }
+
+          database.run("ALTER TABLE tasks ADD COLUMN completed_at TEXT", callback);
+        };
+
         if (columns.some((column) => column.name === "class_id")) {
-          callback(null);
+          ensureCompletedColumn();
           return;
         }
 
         database.run(
           "ALTER TABLE tasks ADD COLUMN class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL",
-          callback
+          (error) => {
+            if (error) {
+              callback(error);
+              return;
+            }
+
+            ensureCompletedColumn();
+          }
         );
       });
     }

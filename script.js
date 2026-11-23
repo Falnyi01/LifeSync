@@ -1,6 +1,5 @@
 const STORAGE_KEY = "student-planner-events-v1";
 const CATEGORY_KEY = "student-planner-categories-v1";
-const COMPLETED_TODO_KEY_PREFIX = "student-planner-completed-v1";
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const fullDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -75,7 +74,6 @@ const state = {
   todoKind: "all",
   todos: [],
   completedTodos: [],
-  todoStorageUserId: null,
   semesters: [],
   classes: [],
   selectedSemesterId: null,
@@ -1250,31 +1248,26 @@ async function loadTodos() {
     throw new Error("The server returned an invalid task list.");
   }
 
-  state.todoStorageUserId = result.userId;
-  state.todos = result.tasks;
-  state.completedTodos = loadCompletedTodos();
-}
-
-function getCompletedTodosStorageKey() {
-  return state.todoStorageUserId
-    ? `${COMPLETED_TODO_KEY_PREFIX}-${state.todoStorageUserId}`
-    : null;
-}
-
-function loadCompletedTodos() {
-  const key = getCompletedTodosStorageKey();
-  if (!key) return [];
-
-  const saved = localStorage.getItem(key);
-  if (!saved) return [];
-
-  try {
-    const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error("Failed to load completed todos.", error);
-    return [];
+  if (result.tasks.some((item) => typeof item.isCompleted !== "boolean")) {
+    throw new Error("The server returned task items without a completion status.");
   }
+
+  state.todos = result.tasks.filter((item) => !item.isCompleted);
+  state.completedTodos = result.tasks
+    .filter((item) => item.isCompleted)
+    .map(toCompletedTodo);
+}
+
+function toCompletedTodo(item) {
+  const completedAt = new Date(item.completedAt);
+  if (!item.completedAt || Number.isNaN(completedAt.getTime())) {
+    throw new Error("The server returned an invalid task completion date.");
+  }
+
+  return {
+    ...item,
+    completedDate: formatDateKey(completedAt)
+  };
 }
 
 function getTodoRequestBody(item) {
@@ -1333,13 +1326,6 @@ async function saveTodos(tasks = state.todos) {
   } catch (error) {
     console.error("Task date update failed:", error);
     setTodoMessage("Could not update an overdue task. Please refresh and try again.", "error");
-  }
-}
-
-function saveCompletedTodos() {
-  const key = getCompletedTodosStorageKey();
-  if (key) {
-    localStorage.setItem(key, JSON.stringify(state.completedTodos));
   }
 }
 
@@ -1520,31 +1506,51 @@ function resetTodoForm() {
   document.getElementById("todo-cancel-edit").classList.add("hidden");
 }
 
-function completeTodo(todoId) {
-  const item = state.todos.find((entry) => entry.id === todoId);
-  if (!item) return;
-
-  fetch(`/api/tasks/${todoId}`, { method: "DELETE" })
-    .then(async (response) => {
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.message || "Could not complete the task.");
-      }
-
-      state.todos = state.todos.filter((entry) => entry.id !== todoId);
-      state.completedTodos.push({
-        ...item,
-        completedDate: formatDateKey(new Date())
-      });
-      saveCompletedTodos();
-      render();
-      setTodoMessage("Item marked complete.", "success");
-    })
-    .catch((error) => {
-      console.error("Task completion failed:", error);
-      renderTodoList();
-      setTodoMessage(error.message || "Could not complete the task.", "error");
+async function updateTodoCompletion(todoId, isCompleted) {
+  try {
+    const response = await fetch(`/api/tasks/${todoId}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isCompleted })
     });
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.message || "Could not update task status.");
+    }
+    if (!result.task || result.task.id !== todoId || result.task.isCompleted !== isCompleted) {
+      throw new Error("The server returned an invalid task status.");
+    }
+
+    if (isCompleted) {
+      state.todos = state.todos.filter((item) => item.id !== todoId);
+      state.completedTodos = [
+        ...state.completedTodos.filter((item) => item.id !== todoId),
+        toCompletedTodo(result.task)
+      ];
+    } else {
+      state.completedTodos = state.completedTodos.filter((item) => item.id !== todoId);
+      state.todos = [
+        ...state.todos.filter((item) => item.id !== todoId),
+        result.task
+      ];
+    }
+
+    render();
+    setTodoMessage(result.message, "success");
+  } catch (error) {
+    console.error("Task status update failed:", error);
+    renderTodoList();
+    setTodoMessage(error.message || "Could not update task status.", "error");
+  }
+}
+
+function completeTodo(todoId) {
+  updateTodoCompletion(todoId, true);
+}
+
+function markTodoIncomplete(todoId) {
+  updateTodoCompletion(todoId, false);
 }
 
 function deleteTodo(todoId) {
@@ -1670,11 +1676,21 @@ function renderTodoList() {
 
           const completionMeta = document.createElement("span");
           completionMeta.className = "todo-item-meta";
-          completionMeta.textContent = `Completed on ${new Date(`${item.completedDate}T00:00:00`).toLocaleDateString()} · Original due ${new Date(`${item.date}T00:00:00`).toLocaleDateString()}${item.className ? ` · ${item.className}` : ""}`;
+          const originalDueDate = item.isAssignment ? item.dueDate : item.date;
+          completionMeta.textContent = `Completed on ${new Date(`${item.completedDate}T00:00:00`).toLocaleDateString()} · Original due ${new Date(`${originalDueDate}T00:00:00`).toLocaleDateString()}${item.className ? ` · ${item.className}` : ""}`;
           text.append(title, completionMeta);
           appendTodoNotes(text, item);
 
-          row.appendChild(text);
+          const actions = document.createElement("div");
+          actions.className = "todo-item-actions";
+          const reopenButton = document.createElement("button");
+          reopenButton.type = "button";
+          reopenButton.className = "todo-button";
+          reopenButton.textContent = "Mark incomplete";
+          reopenButton.addEventListener("click", () => markTodoIncomplete(item.id));
+          actions.appendChild(reopenButton);
+
+          row.append(text, actions);
           items.appendChild(row);
         });
 
@@ -2276,7 +2292,6 @@ async function deleteClass(classRecord) {
     if (state.todoClassSelection === String(classRecord.id)) {
       state.todoClassSelection = "";
     }
-    saveCompletedTodos();
     state.classLoadError = null;
     if (state.editingClassId === classRecord.id) {
       resetClassForm();
@@ -2482,7 +2497,6 @@ function bindClassForm() {
         state.completedTodos = state.completedTodos.map((item) => item.classId === editingId
           ? { ...item, className: result.class.name }
           : item);
-        saveCompletedTodos();
       }
       state.classLoadError = null;
       resetClassForm();

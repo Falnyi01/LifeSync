@@ -217,6 +217,42 @@ test("stores assignment due dates and reminder dates", async () => {
   assert.equal(task.date, expectedReminderDate.toISOString().slice(0, 10));
 });
 
+test("persists completed status and allows a task to be marked incomplete", async () => {
+  const cookie = await createLoggedInUser();
+  const createResponse = await send("/api/tasks", {
+    method: "POST",
+    cookie,
+    body: personalTask
+  });
+  assert.equal(createResponse.status, 201);
+  const { task } = await createResponse.json();
+
+  const completeResponse = await send(`/api/tasks/${task.id}/status`, {
+    method: "PATCH",
+    cookie,
+    body: { isCompleted: true }
+  });
+  assert.equal(completeResponse.status, 200);
+  const completedTask = (await completeResponse.json()).task;
+  assert.equal(completedTask.isCompleted, true);
+  assert.ok(Date.parse(completedTask.completedAt));
+
+  const completedListResponse = await send("/api/tasks", { cookie });
+  const completedList = await completedListResponse.json();
+  assert.equal(completedList.tasks[0].isCompleted, true);
+  assert.equal(completedList.tasks[0].completedAt, completedTask.completedAt);
+
+  const reopenResponse = await send(`/api/tasks/${task.id}/status`, {
+    method: "PATCH",
+    cookie,
+    body: { isCompleted: false }
+  });
+  assert.equal(reopenResponse.status, 200);
+  const reopenedTask = (await reopenResponse.json()).task;
+  assert.equal(reopenedTask.isCompleted, false);
+  assert.equal(reopenedTask.completedAt, null);
+});
+
 test("links assignments to saved classes and clears the link when a class is deleted", async () => {
   const cookie = await createLoggedInUser();
   const classRecord = await createSavedClass(cookie);
@@ -323,4 +359,11 @@ test("keeps task lists and mutations scoped to the signed-in user", async () => 
     cookie: otherUserCookie
   });
   assert.equal(deleteResponse.status, 404);
+
+  const statusResponse = await send(`/api/tasks/${task.id}/status`, {
+    method: "PATCH",
+    cookie: otherUserCookie,
+    body: { isCompleted: true }
+  });
+  assert.equal(statusResponse.status, 404);
 });
