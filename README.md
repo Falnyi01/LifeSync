@@ -40,8 +40,8 @@ This README will be updated as the project progresses.
 
 ### User Management
 - [x] User account registration
-- [ ] User login
-- [ ] User logout
+- [x] User login
+- [x] User logout
 
 ### Semester & Class Management
 - [ ] Create and manage semesters
