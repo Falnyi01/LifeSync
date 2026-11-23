@@ -312,7 +312,8 @@ input {
 
 .event-panel,
 .semester-form-panel,
-.semester-list-panel {
+.semester-list-panel,
+.class-form-panel {
   margin-top: 20px;
   background: rgba(17, 24, 39, 0.92);
   border: 1px solid var(--border);
@@ -322,12 +323,14 @@ input {
 
 .event-panel h2,
 .semester-form-panel h2,
-.semester-list-panel h2 {
+.semester-list-panel h2,
+.class-form-panel h2 {
   margin-top: 0;
 }
 
 #event-form,
-.semester-form {
+.semester-form,
+.class-form {
   display: grid;
   gap: 14px;
 }
@@ -345,6 +348,43 @@ input {
 .semester-item.selected {
   border-color: var(--primary);
   box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.meeting-days-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.meeting-days-fieldset legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.meeting-days-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.meeting-day-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0f172a;
+  cursor: pointer;
+}
+
+.meeting-day-option input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--primary);
 }
 
 .field-group {
