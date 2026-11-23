@@ -46,19 +46,19 @@ This README will be updated as the project progresses.
 ### Semester & Class Management
 - [x] Create and manage semesters
 - [x] Add and manage classes
-- [ ] Generate class schedules
-
-### Assignment & Task Tracking
-- [ ] Create and manage assignments
-- [ ] Track personal tasks
+- [ ] Assignment and Task Management
 
 ### Calendar & Time Tracking
-- [ ] View class schedules and deadlines
-- [ ] Track work and study hours
+- [ ] Calendar and Event Management
+- [ ] Work and Study Time Tracking
 
 ### Budget & Analytics
-- [ ] Record income and expenses
-- [ ] View spending summaries and charts
+- [ ] Income and Expense Tracking
+- [ ] Monthly Budget Planning
+
+### Financial and Activity Summary
+- [ ] Financial Summary
+- [ ] Activity Summary 
 
 *Features are updated as development progresses.*
 
