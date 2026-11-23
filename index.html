@@ -159,32 +159,52 @@
           </div>
 
           <div class="todo-form-panel">
-            <h2 id="todo-form-title">Add To-Do</h2>
+            <h2 id="todo-form-title">Add Personal Task</h2>
             <form id="todo-form" class="todo-form">
-              <input id="todo-title" type="text" placeholder="What do you need to do?" />
-              <select id="todo-type" aria-label="Task type">
-                <option value="task">Task</option>
-                <option value="assignment">Assignment</option>
-              </select>
-              <div id="todo-date-field">
-                <input id="todo-date" type="date" />
+              <div class="field-group">
+                <label for="todo-title">Title</label>
+                <input id="todo-title" type="text" maxlength="100" placeholder="What do you need to do?" required />
+              </div>
+              <div class="field-group">
+                <label for="todo-type">Type</label>
+                <select id="todo-type" aria-label="Task type">
+                  <option value="task">Personal Task</option>
+                  <option value="assignment">Assignment</option>
+                </select>
+              </div>
+              <div id="todo-date-field" class="field-group">
+                <label for="todo-date">Task date</label>
+                <input id="todo-date" type="date" required />
               </div>
               <div id="assignment-fields" class="assignment-fields hidden">
-                <label>
+                <label for="todo-due-date">
                   <span>Due date</span>
                   <input id="todo-due-date" type="date" />
                 </label>
-                <label>
+                <label for="todo-due-time">
                   <span>Due time</span>
                   <input id="todo-due-time" type="time" />
                 </label>
-                <label>
+                <label for="todo-class-id">
+                  <span>Class (optional)</span>
+                  <select id="todo-class-id">
+                    <option value="">No class</option>
+                  </select>
+                </label>
+                <label for="todo-reminder-days">
                   <span>Reminder (days before)</span>
                   <input id="todo-reminder-days" type="number" min="0" max="30" step="1" value="3" />
                 </label>
               </div>
-              <button type="submit" class="primary-button">Add Item</button>
-              <button type="button" id="todo-cancel-edit" class="secondary-button hidden">Cancel</button>
+              <label class="field-group todo-notes-field" for="todo-notes">
+                <span>Notes (optional)</span>
+                <textarea id="todo-notes" rows="3" maxlength="500"></textarea>
+              </label>
+              <div class="button-row todo-form-actions">
+                <button type="submit" class="primary-button">Add Personal Task</button>
+                <button type="button" id="todo-cancel-edit" class="secondary-button hidden">Cancel</button>
+              </div>
+              <p id="todo-form-message" class="auth-message" role="status" aria-live="polite"></p>
             </form>
           </div>
 

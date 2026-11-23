@@ -27,7 +27,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -230,12 +231,18 @@ h1 {
 }
 
 select,
-input {
+input,
+textarea {
   background: #0f172a;
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 9px 10px;
+}
+
+textarea {
+  min-height: 84px;
+  resize: vertical;
 }
 
 .calendar-view {
@@ -531,7 +538,8 @@ input {
 }
 
 .weekly-grid-header,
-.weekly-grid-body {
+.weekly-grid-body,
+.schedule-all-day-row {
   display: grid;
   grid-template-columns: 160px repeat(7, minmax(130px, 1fr));
 }
@@ -561,6 +569,25 @@ input {
 .schedule-day-header {
   position: sticky;
   top: 0;
+}
+
+.schedule-all-day-label,
+.schedule-all-day-cell {
+  border: 1px solid var(--border);
+  padding: 6px;
+  background: rgba(15, 23, 42, 0.92);
+}
+
+.schedule-all-day-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.schedule-all-day-cell .week-event {
+  margin-bottom: 6px;
+  padding: 6px;
 }
 
 .schedule-time-column,
@@ -655,16 +682,21 @@ input {
 
 .todo-form {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(140px, 1fr) minmax(180px, 1fr) auto auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: end;
+}
+
+.assignment-fields,
+.todo-notes-field,
+.todo-form-actions {
+  grid-column: 1 / -1;
 }
 
 .assignment-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  grid-column: 1 / -1;
 }
 
 .assignment-fields label {
@@ -673,6 +705,11 @@ input {
   gap: 6px;
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.todo-notes-field > span {
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .todo-list {

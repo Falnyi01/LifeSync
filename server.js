@@ -190,6 +190,114 @@ function getPositiveId(value) {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+function getTaskDetails(body) {
+  const details = body && typeof body === "object" ? body : {};
+  const itemType = details.type;
+  const title = typeof details.title === "string" ? details.title.trim() : "";
+  const notes = typeof details.notes === "string" ? details.notes.trim() : "";
+  const taskDate = typeof details.taskDate === "string" ? details.taskDate : "";
+  const dueDate = typeof details.dueDate === "string" ? details.dueDate : "";
+  const dueTime = typeof details.dueTime === "string" ? details.dueTime : "";
+  const reminderDays = details.reminderDays === undefined ? 0 : Number(details.reminderDays);
+  const hasClassId = details.classId !== undefined && details.classId !== null && details.classId !== "";
+  const classId = hasClassId ? getPositiveId(details.classId) : null;
+
+  if (itemType !== "task" && itemType !== "assignment") {
+    return { error: "Choose a personal task or assignment." };
+  }
+  if (hasClassId && !classId) {
+    return { error: "Choose a valid saved class." };
+  }
+  if (itemType === "task" && classId !== null) {
+    return { error: "Only assignments can be linked to a class." };
+  }
+  if (!title || title.length > 100) {
+    return { error: "Enter a title of 1 to 100 characters." };
+  }
+  if (typeof details.notes !== "undefined" && typeof details.notes !== "string") {
+    return { error: "Notes must be text." };
+  }
+  if (notes.length > 500) {
+    return { error: "Notes must be 500 characters or fewer." };
+  }
+  if (!Number.isInteger(reminderDays) || reminderDays < 0 || reminderDays > 30) {
+    return { error: "Reminder days must be a whole number from 0 to 30." };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (itemType === "task") {
+    if (!isValidDateString(taskDate)) {
+      return { error: "Enter a valid task date." };
+    }
+    if (taskDate < today) {
+      return { error: "The selected date must be today or later." };
+    }
+
+    const maximumDate = new Date(`${today}T00:00:00.000Z`);
+    maximumDate.setUTCDate(maximumDate.getUTCDate() + 7);
+    if (taskDate > maximumDate.toISOString().slice(0, 10)) {
+      return { error: "Tasks can only be created for today or up to 7 days in the future." };
+    }
+
+    return {
+      itemType,
+      title,
+      notes,
+      taskDate,
+      dueDate: null,
+      dueTime: null,
+      reminderDays: 0,
+      reminderDate: null,
+      classId: null
+    };
+  }
+
+  if (!isValidDateString(dueDate) || dueDate < today) {
+    return { error: "Enter a valid assignment due date that is today or later." };
+  }
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dueTime)) {
+    return { error: "Enter a valid assignment due time." };
+  }
+
+  const reminderDate = new Date(`${dueDate}T00:00:00.000Z`);
+  reminderDate.setUTCDate(reminderDate.getUTCDate() - reminderDays);
+
+  return {
+    itemType,
+    title,
+    notes,
+    taskDate: null,
+    dueDate,
+    dueTime,
+    reminderDays,
+    reminderDate: reminderDate.toISOString().slice(0, 10),
+    classId
+  };
+}
+
+function toTodoItem(task) {
+  const isAssignment = task.itemType === "assignment";
+  const completedAt = task.completedAt || null;
+
+  return {
+    id: task.id,
+    title: task.title,
+    notes: task.notes,
+    date: isAssignment ? task.reminderDate || task.dueDate : task.taskDate,
+    originalDate: null,
+    createdDate: isAssignment ? task.dueDate : task.taskDate,
+    isAssignment,
+    dueDate: isAssignment ? task.dueDate : "",
+    dueTime: isAssignment ? task.dueTime : "",
+    reminderDays: isAssignment ? task.reminderDays : 0,
+    reminderDate: isAssignment ? task.reminderDate : null,
+    classId: isAssignment ? task.classId : null,
+    className: isAssignment ? task.className || "" : "",
+    isCompleted: Boolean(completedAt),
+    completedAt
+  };
+}
+
 function findSemesterForUser(userId, semesterId) {
   return new Promise((resolve, reject) => {
     database.get(
@@ -198,6 +306,33 @@ function findSemesterForUser(userId, semesterId) {
        WHERE id = ? AND user_id = ?`,
       [semesterId, userId],
       (error, semester) => error ? reject(error) : resolve(semester)
+    );
+  });
+}
+
+function findClassForUser(userId, classId) {
+  return new Promise((resolve, reject) => {
+    database.get(
+      "SELECT id, name FROM classes WHERE id = ? AND user_id = ?",
+      [classId, userId],
+      (error, classRecord) => error ? reject(error) : resolve(classRecord || null)
+    );
+  });
+}
+
+function findTaskForUser(userId, taskId) {
+  return new Promise((resolve, reject) => {
+    database.get(
+      `SELECT t.id, t.item_type AS itemType, t.title, t.notes,
+              t.task_date AS taskDate, t.due_date AS dueDate,
+              t.due_time AS dueTime, t.reminder_days AS reminderDays,
+              t.reminder_date AS reminderDate, t.class_id AS classId,
+              t.completed_at AS completedAt, c.name AS className
+       FROM tasks t
+       LEFT JOIN classes c ON c.id = t.class_id AND c.user_id = t.user_id
+       WHERE t.id = ? AND t.user_id = ?`,
+      [taskId, userId],
+      (error, task) => error ? reject(error) : resolve(task || null)
     );
   });
 }
@@ -471,6 +606,241 @@ app.delete("/api/semesters/:id", requireApiLogin, async (request, response) => {
   } catch (error) {
     console.error("Semester deletion failed:", error);
     return response.status(500).json({ message: "Unable to delete the semester right now." });
+  }
+});
+
+app.get("/api/tasks", requireApiLogin, async (request, response) => {
+  try {
+    const tasks = await new Promise((resolve, reject) => {
+      database.all(
+        `SELECT t.id, t.item_type AS itemType, t.title, t.notes,
+                t.task_date AS taskDate, t.due_date AS dueDate,
+                t.due_time AS dueTime, t.reminder_days AS reminderDays,
+                t.reminder_date AS reminderDate, t.class_id AS classId,
+                t.completed_at AS completedAt,
+                c.name AS className
+         FROM tasks t
+         LEFT JOIN classes c ON c.id = t.class_id AND c.user_id = t.user_id
+         WHERE t.user_id = ?
+         ORDER BY COALESCE(t.task_date, t.reminder_date), t.id`,
+        [request.session.userId],
+        (error, rows) => error ? reject(error) : resolve(rows)
+      );
+    });
+
+    return response.json({
+      userId: request.session.userId,
+      tasks: tasks.map(toTodoItem)
+    });
+  } catch (error) {
+    console.error("Task list failed:", error);
+    return response.status(500).json({ message: "Unable to load tasks right now." });
+  }
+});
+
+app.post("/api/tasks", requireApiLogin, async (request, response) => {
+  const details = getTaskDetails(request.body);
+  if (details.error) {
+    return response.status(400).json({ message: details.error });
+  }
+
+  try {
+    const classRecord = details.classId === null
+      ? null
+      : await findClassForUser(request.session.userId, details.classId);
+    if (details.classId !== null && !classRecord) {
+      return response.status(404).json({ message: "Class not found." });
+    }
+
+    const id = await new Promise((resolve, reject) => {
+      database.run(
+        `INSERT INTO tasks (
+          user_id, item_type, title, notes, task_date, due_date,
+          due_time, reminder_days, reminder_date, class_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          request.session.userId,
+          details.itemType,
+          details.title,
+          details.notes,
+          details.taskDate,
+          details.dueDate,
+          details.dueTime,
+          details.reminderDays,
+          details.reminderDate,
+          details.classId
+        ],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.lastID);
+        }
+      );
+    });
+
+    return response.status(201).json({
+      message: "Task saved successfully.",
+      task: toTodoItem({ id, ...details, className: classRecord ? classRecord.name : "" })
+    });
+  } catch (error) {
+    console.error("Task creation failed:", error);
+    return response.status(500).json({ message: "Unable to save the task right now." });
+  }
+});
+
+app.put("/api/tasks/:id", requireApiLogin, async (request, response) => {
+  const id = getPositiveId(request.params.id);
+  if (!id) {
+    return response.status(400).json({ message: "Enter a valid task ID." });
+  }
+
+  const details = getTaskDetails(request.body);
+  if (details.error) {
+    return response.status(400).json({ message: details.error });
+  }
+
+  try {
+    const classRecord = details.classId === null
+      ? null
+      : await findClassForUser(request.session.userId, details.classId);
+    if (details.classId !== null && !classRecord) {
+      return response.status(404).json({ message: "Class not found." });
+    }
+
+    const changes = await new Promise((resolve, reject) => {
+      database.run(
+        `UPDATE tasks
+         SET item_type = ?, title = ?, notes = ?, task_date = ?, due_date = ?,
+             due_time = ?, reminder_days = ?, reminder_date = ?, class_id = ?,
+             updated_at = datetime('now')
+         WHERE id = ? AND user_id = ?`,
+        [
+          details.itemType,
+          details.title,
+          details.notes,
+          details.taskDate,
+          details.dueDate,
+          details.dueTime,
+          details.reminderDays,
+          details.reminderDate,
+          details.classId,
+          id,
+          request.session.userId
+        ],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.changes);
+        }
+      );
+    });
+
+    if (!changes) {
+      return response.status(404).json({ message: "Task not found." });
+    }
+
+    const savedTask = await findTaskForUser(request.session.userId, id);
+    if (!savedTask) {
+      return response.status(404).json({ message: "Task not found." });
+    }
+
+    return response.json({
+      message: "Task updated successfully.",
+      task: toTodoItem(savedTask)
+    });
+  } catch (error) {
+    console.error("Task update failed:", error);
+    return response.status(500).json({ message: "Unable to update the task right now." });
+  }
+});
+
+app.patch("/api/tasks/:id/status", requireApiLogin, async (request, response) => {
+  const id = getPositiveId(request.params.id);
+  const isCompleted = request.body && request.body.isCompleted;
+  if (!id) {
+    return response.status(400).json({ message: "Enter a valid task ID." });
+  }
+  if (typeof isCompleted !== "boolean") {
+    return response.status(400).json({ message: "Choose whether the task is complete." });
+  }
+
+  try {
+    const changes = await new Promise((resolve, reject) => {
+      database.run(
+        `UPDATE tasks
+         SET completed_at = CASE
+               WHEN ? = 1 THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+               ELSE NULL
+             END,
+             updated_at = datetime('now')
+         WHERE id = ? AND user_id = ?`,
+        [isCompleted ? 1 : 0, id, request.session.userId],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.changes);
+        }
+      );
+    });
+
+    if (!changes) {
+      return response.status(404).json({ message: "Task not found." });
+    }
+
+    const task = await findTaskForUser(request.session.userId, id);
+    if (!task) {
+      return response.status(404).json({ message: "Task not found." });
+    }
+
+    return response.json({
+      message: isCompleted ? "Task marked complete." : "Task marked incomplete.",
+      task: toTodoItem(task)
+    });
+  } catch (error) {
+    console.error("Task status update failed:", error);
+    return response.status(500).json({ message: "Unable to update task status right now." });
+  }
+});
+
+app.delete("/api/tasks/:id", requireApiLogin, async (request, response) => {
+  const id = getPositiveId(request.params.id);
+  if (!id) {
+    return response.status(400).json({ message: "Enter a valid task ID." });
+  }
+
+  try {
+    const changes = await new Promise((resolve, reject) => {
+      database.run(
+        "DELETE FROM tasks WHERE id = ? AND user_id = ?",
+        [id, request.session.userId],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.changes);
+        }
+      );
+    });
+
+    if (!changes) {
+      return response.status(404).json({ message: "Task not found." });
+    }
+
+    return response.json({ message: "Task deleted successfully." });
+  } catch (error) {
+    console.error("Task deletion failed:", error);
+    return response.status(500).json({ message: "Unable to delete the task right now." });
   }
 });
 

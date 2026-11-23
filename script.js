@@ -70,6 +70,7 @@ const state = {
   todoView: "day",
   todoSelectedDate: new Date(),
   todoEditingId: null,
+  todoClassSelection: "",
   todoKind: "all",
   todos: [],
   completedTodos: [],
@@ -263,9 +264,10 @@ function renderPeriodLabel() {
 
 function getEventsForDate(dateString) {
   const classEvents = getClassEventsForDate(dateString);
+  const taskEvents = getTodoCalendarEventsForDate(dateString);
   return state.events
     .filter((event) => event.date === dateString)
-    .concat(classEvents)
+    .concat(classEvents, taskEvents)
     .sort((a, b) => a.start.localeCompare(b.start));
 }
 
@@ -294,13 +296,35 @@ function getClassEventsForDate(dateString) {
     }));
 }
 
+function getTodoCalendarEventsForDate(dateString) {
+  return state.todos
+    .filter((item) => getTodoDisplayDate(item) === dateString)
+    .map((item) => ({
+      id: `todo-${item.id}`,
+      todoId: item.id,
+      isTodo: true,
+      isAssignment: item.isAssignment,
+      title: item.title,
+      date: dateString,
+      start: "00:00",
+      end: "00:00",
+      category: item.isAssignment ? "assignment" : "personal",
+      color: getCategoryColor(item.isAssignment ? "assignment" : "personal"),
+      dueDate: item.dueDate,
+      dueTime: item.dueTime,
+      classId: item.classId,
+      className: item.className
+    }));
+}
+
 function getEventsForRange(startDate, endDate) {
   const events = state.events.filter((event) => event.date >= startDate && event.date <= endDate);
   const date = new Date(`${startDate}T00:00:00`);
   const finalDate = new Date(`${endDate}T00:00:00`);
 
   while (date <= finalDate) {
-    events.push(...getClassEventsForDate(formatDateForInput(date)));
+    const dateKey = formatDateForInput(date);
+    events.push(...getClassEventsForDate(dateKey), ...getTodoCalendarEventsForDate(dateKey));
     date.setDate(date.getDate() + 1);
   }
 
@@ -309,8 +333,9 @@ function getEventsForRange(startDate, endDate) {
 
 function buildEventPill(event) {
   const styles = getEventDisplayStyles(event);
-  const pill = document.createElement(event.classId ? "span" : "button");
-  if (!event.classId) {
+  const isReadOnlyClass = event.classId && !event.isTodo;
+  const pill = document.createElement(isReadOnlyClass ? "span" : "button");
+  if (!isReadOnlyClass) {
     pill.type = "button";
   }
   pill.className = "event-pill";
@@ -318,7 +343,12 @@ function buildEventPill(event) {
   pill.style.borderColor = styles.borderColor;
   pill.style.color = styles.color;
   pill.textContent = event.title;
-  if (!event.classId) {
+  if (event.isTodo) {
+    pill.addEventListener("click", (eventClick) => {
+      eventClick.stopPropagation();
+      startEditTodo(event.todoId);
+    });
+  } else if (!event.classId) {
     pill.addEventListener("click", (eventClick) => {
       eventClick.stopPropagation();
       startEditEvent(event.id);
@@ -485,10 +515,22 @@ function createEventCard(event) {
   title.textContent = event.title;
 
   const category = document.createElement("div");
-  category.textContent = event.category;
+  category.textContent = event.isTodo
+    ? event.isAssignment ? "Assignment reminder" : "Personal task"
+    : event.category;
 
   const time = document.createElement("div");
-  time.textContent = `${formatTime(event.start)} - ${formatTime(event.end)}`;
+  if (event.isTodo) {
+    const classLabel = event.className ? ` · ${event.className}` : "";
+    if (event.isAssignment) {
+      const dueDate = new Date(`${event.dueDate}T00:00:00`).toLocaleDateString();
+      time.textContent = `Reminder · due ${dueDate} at ${formatTime(event.dueTime)}${classLabel}`;
+    } else {
+      time.textContent = `All day${classLabel}`;
+    }
+  } else {
+    time.textContent = `${formatTime(event.start)} - ${formatTime(event.end)}`;
+  }
 
   card.append(title, category, time);
 
@@ -498,7 +540,7 @@ function createEventCard(event) {
     card.appendChild(location);
   }
 
-  if (event.classId) {
+  if (event.classId && !event.isTodo) {
     card.classList.add("class-event");
     return card;
   }
@@ -510,13 +552,25 @@ function createEventCard(event) {
   editButton.type = "button";
   editButton.className = "event-action";
   editButton.textContent = "Edit";
-  editButton.addEventListener("click", () => startEditEvent(event.id));
+  editButton.addEventListener("click", () => {
+    if (event.isTodo) {
+      startEditTodo(event.todoId);
+    } else {
+      startEditEvent(event.id);
+    }
+  });
 
   const deleteButton = document.createElement("button");
   deleteButton.type = "button";
   deleteButton.className = "event-action";
   deleteButton.textContent = "Delete";
-  deleteButton.addEventListener("click", () => deleteEvent(event.id));
+  deleteButton.addEventListener("click", () => {
+    if (event.isTodo) {
+      deleteTodo(event.todoId);
+    } else {
+      deleteEvent(event.id);
+    }
+  });
 
   actions.append(editButton, deleteButton);
   card.appendChild(actions);
@@ -577,8 +631,9 @@ function renderWeeklySummary() {
   const visibleDates = getVisibleWeekDates();
   const visibleHours = state.weeklyEndHour - state.weeklyStartHour;
   const selectedEvents = getFilteredWeeklyEvents();
+  const scheduledEvents = selectedEvents.filter((event) => !event.isTodo);
 
-  const eventTotals = selectedEvents.map((event) => ({
+  const eventTotals = scheduledEvents.map((event) => ({
     title: event.title,
     duration: getExactDurationMinutes(event.start, event.end),
     date: event.date
@@ -586,7 +641,7 @@ function renderWeeklySummary() {
 
   const dayTotals = visibleDates.map((date) => {
     const dateKey = formatDateForInput(date);
-    const dayEvents = selectedEvents.filter((event) => event.date === dateKey);
+    const dayEvents = scheduledEvents.filter((event) => event.date === dateKey);
     const busyMinutes = dayEvents.reduce(
       (total, event) => total + getEventMinutesWithinRange(event, state.weeklyStartHour, state.weeklyEndHour),
       0
@@ -735,6 +790,24 @@ function renderWeeklyPlanner() {
 
   scheduleGrid.appendChild(header);
 
+  const allDayRow = document.createElement("div");
+  allDayRow.className = "schedule-all-day-row";
+  const allDayLabel = document.createElement("div");
+  allDayLabel.className = "schedule-all-day-label";
+  allDayLabel.textContent = "All day";
+  allDayRow.appendChild(allDayLabel);
+
+  weekDates.forEach((date) => {
+    const dateKey = formatDateForInput(date);
+    const cell = document.createElement("div");
+    cell.className = "schedule-all-day-cell";
+    selectedEvents
+      .filter((event) => event.isTodo && event.date === dateKey)
+      .forEach((event) => cell.appendChild(createEventCard(event)));
+    allDayRow.appendChild(cell);
+  });
+  scheduleGrid.appendChild(allDayRow);
+
   const body = document.createElement("div");
   body.className = "weekly-grid-body";
 
@@ -754,7 +827,7 @@ function renderWeeklyPlanner() {
   weekDates.forEach((date) => {
     const dateKey = formatDateForInput(date);
     const dayEvents = selectedEvents
-      .filter((event) => event.date === dateKey)
+      .filter((event) => !event.isTodo && event.date === dateKey)
       .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
 
     const dayColumn = document.createElement("div");
@@ -850,6 +923,7 @@ function render() {
   renderDayView();
   renderWeeklyPlanner();
   renderTodoList();
+  renderAssignmentClassOptions();
   renderClasses();
 
   const dateInput = document.getElementById("event-date");
@@ -1156,64 +1230,136 @@ function applyTodoDateBounds() {
       dueInput.max = bounds.max;
     }
   }
-}
 
-function loadTodos() {
-  const saved = localStorage.getItem("student-planner-todos-v1");
-  if (!saved) return [];
-
-  try {
-    const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error("Failed to load todos.", error);
-    return [];
+  const assignmentDueDate = document.getElementById("todo-due-date");
+  if (assignmentDueDate) {
+    assignmentDueDate.min = bounds.min;
   }
 }
 
-function loadCompletedTodos() {
-  const saved = localStorage.getItem("student-planner-completed-v1");
-  if (!saved) return [];
+async function loadTodos() {
+  const response = await fetch("/api/tasks");
+  const result = await response.json();
 
-  try {
-    const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error("Failed to load completed todos.", error);
-    return [];
+  if (!response.ok) {
+    throw new Error(result.message || "Could not load tasks.");
+  }
+  if (!result || !Number.isSafeInteger(result.userId) || !Array.isArray(result.tasks)) {
+    throw new Error("The server returned an invalid task list.");
+  }
+
+  if (result.tasks.some((item) => typeof item.isCompleted !== "boolean")) {
+    throw new Error("The server returned task items without a completion status.");
+  }
+
+  state.todos = result.tasks.filter((item) => !item.isCompleted);
+  state.completedTodos = result.tasks
+    .filter((item) => item.isCompleted)
+    .map(toCompletedTodo);
+}
+
+function toCompletedTodo(item) {
+  const completedAt = new Date(item.completedAt);
+  if (!item.completedAt || Number.isNaN(completedAt.getTime())) {
+    throw new Error("The server returned an invalid task completion date.");
+  }
+
+  return {
+    ...item,
+    completedDate: formatDateKey(completedAt)
+  };
+}
+
+function getTodoRequestBody(item) {
+  return {
+    type: item.isAssignment ? "assignment" : "task",
+    title: item.title,
+    notes: item.notes || "",
+    taskDate: item.isAssignment ? "" : item.date,
+    dueDate: item.isAssignment ? item.dueDate : "",
+    dueTime: item.isAssignment ? item.dueTime : "",
+    reminderDays: item.isAssignment ? item.reminderDays : 0,
+    classId: item.isAssignment ? item.classId || null : null
+  };
+}
+
+function renderAssignmentClassOptions() {
+  const select = document.getElementById("todo-class-id");
+  if (!select) return;
+
+  select.replaceChildren();
+  const noClassOption = document.createElement("option");
+  noClassOption.value = "";
+  noClassOption.textContent = "No class";
+  select.appendChild(noClassOption);
+
+  state.classes.forEach((classRecord) => {
+    const option = document.createElement("option");
+    option.value = String(classRecord.id);
+    const semester = state.semesters.find((item) => item.id === classRecord.semesterId);
+    option.textContent = semester
+      ? `${classRecord.name} (${semester.name})`
+      : classRecord.name;
+    select.appendChild(option);
+  });
+
+  select.value = state.todoClassSelection;
+  if (select.value !== state.todoClassSelection && state.classes.length > 0) {
+    state.todoClassSelection = "";
   }
 }
 
-function saveTodos() {
-  localStorage.setItem("student-planner-todos-v1", JSON.stringify(state.todos));
+async function saveTodos(tasks = state.todos) {
+  try {
+    await Promise.all(tasks.map(async (item) => {
+      const response = await fetch(`/api/tasks/${item.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(getTodoRequestBody(item))
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || "Could not save a task update.");
+      }
+    }));
+  } catch (error) {
+    console.error("Task date update failed:", error);
+    setTodoMessage("Could not update an overdue task. Please refresh and try again.", "error");
+  }
 }
 
-function saveCompletedTodos() {
-  localStorage.setItem("student-planner-completed-v1", JSON.stringify(state.completedTodos));
+function setTodoMessage(text, status = "") {
+  const message = document.getElementById("todo-form-message");
+  if (!message) return;
+
+  message.textContent = text;
+  message.className = status ? `auth-message ${status}` : "auth-message";
 }
 
 function advanceOverdueTodos() {
   const today = new Date();
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const todayKey = formatDateKey(todayStart);
-  let changed = false;
+  const shiftedTasks = [];
 
   state.todos = state.todos.map((item) => {
     const taskDate = new Date(`${item.date}T00:00:00`);
-    if (taskDate < todayStart) {
-      changed = true;
-      const nextDate = addDays(taskDate, 1);
-      return {
+    if (!item.isAssignment && taskDate < todayStart) {
+      const nextDate = new Date(todayStart);
+      const updatedTask = {
         ...item,
         date: formatDateKey(nextDate),
         originalDate: item.originalDate || item.date
       };
+      shiftedTasks.push(updatedTask);
+      return updatedTask;
     }
     return item;
   });
 
-  if (changed) {
-    saveTodos();
+  if (shiftedTasks.length) {
+    saveTodos(shiftedTasks);
   }
 
   if (state.todoSelectedDate < todayStart) {
@@ -1270,7 +1416,7 @@ function buildTodoMetaText(item) {
     const dueSummary = dueDateForDisplay
       ? `Due ${dueDateLabel}${dueText} · ${remainingDays !== null && remainingDays >= 0 ? `Due in ${remainingDays} day${remainingDays === 1 ? "" : "s"}` : remainingDays !== null ? `${Math.abs(remainingDays)} day${Math.abs(remainingDays) === 1 ? "" : "s"} overdue` : "Due date pending"}${reminderNote}`
       : `No due date set${reminderNote}`;
-    return dueSummary;
+    return item.className ? `${dueSummary} · ${item.className}` : dueSummary;
   }
 
   return `Due ${dateLabel}`;
@@ -1281,6 +1427,13 @@ function toggleAssignmentFields() {
   const assignmentFields = document.getElementById("assignment-fields");
   const todoDateField = document.getElementById("todo-date-field");
   const isAssignment = todoType && todoType.value === "assignment";
+  const taskDateInput = document.getElementById("todo-date");
+  const dueDateInput = document.getElementById("todo-due-date");
+  const dueTimeInput = document.getElementById("todo-due-time");
+  const formTitle = document.getElementById("todo-form-title");
+  const submitButton = document.querySelector("#todo-form .primary-button");
+  const itemLabel = isAssignment ? "Assignment" : "Personal Task";
+  const actionLabel = state.todoEditingId === null ? "Add" : "Save";
 
   if (assignmentFields) {
     assignmentFields.classList.toggle("hidden", !isAssignment);
@@ -1290,15 +1443,28 @@ function toggleAssignmentFields() {
     todoDateField.classList.toggle("hidden", isAssignment);
   }
 
-  const dueInput = document.getElementById("todo-date");
-  if (dueInput) {
-    const bounds = getTodoDateBounds();
-    dueInput.min = bounds.min;
+  const bounds = getTodoDateBounds();
+  if (taskDateInput) {
+    taskDateInput.required = !isAssignment;
+    taskDateInput.min = bounds.min;
     if (isAssignment) {
-      dueInput.removeAttribute("max");
+      taskDateInput.removeAttribute("max");
     } else {
-      dueInput.max = bounds.max;
+      taskDateInput.max = bounds.max;
     }
+  }
+  if (dueDateInput) {
+    dueDateInput.required = isAssignment;
+    dueDateInput.min = bounds.min;
+  }
+  if (dueTimeInput) {
+    dueTimeInput.required = isAssignment;
+  }
+  if (formTitle) {
+    formTitle.textContent = `${state.todoEditingId === null ? "Add" : "Edit"} ${itemLabel}`;
+  }
+  if (submitButton) {
+    submitButton.textContent = `${actionLabel} ${itemLabel}`;
   }
 }
 
@@ -1306,17 +1472,23 @@ function startEditTodo(todoId) {
   const item = state.todos.find((entry) => entry.id === todoId);
   if (!item) return;
 
+  const shouldOpenTodoTab = state.activeTab !== "todo";
+  state.activeTab = "todo";
   state.todoEditingId = todoId;
-  document.getElementById("todo-form-title").textContent = "Edit To-Do";
   document.getElementById("todo-title").value = item.title;
   document.getElementById("todo-type").value = item.isAssignment ? "assignment" : "task";
   document.getElementById("todo-date").value = item.date;
+  document.getElementById("todo-notes").value = item.notes || "";
   document.getElementById("todo-due-date").value = item.dueDate || "";
   document.getElementById("todo-due-time").value = item.dueTime || "";
   document.getElementById("todo-reminder-days").value = item.reminderDays || 3;
+  state.todoClassSelection = item.classId ? String(item.classId) : "";
+  renderAssignmentClassOptions();
   toggleAssignmentFields();
   document.getElementById("todo-cancel-edit").classList.remove("hidden");
-  document.querySelector("#todo-form .primary-button").textContent = "Save Item";
+  if (shouldOpenTodoTab) {
+    render();
+  }
 }
 
 function resetTodoForm() {
@@ -1324,35 +1496,92 @@ function resetTodoForm() {
   if (!form) return;
 
   form.reset();
-  document.getElementById("todo-form-title").textContent = "Add To-Do";
   document.getElementById("todo-type").value = "task";
   document.getElementById("todo-date").value = formatDateKey(state.todoSelectedDate);
   document.getElementById("todo-reminder-days").value = 3;
+  state.todoEditingId = null;
+  state.todoClassSelection = "";
+  document.getElementById("todo-class-id").value = "";
   toggleAssignmentFields();
   document.getElementById("todo-cancel-edit").classList.add("hidden");
-  state.todoEditingId = null;
-  form.querySelector(".primary-button").textContent = "Add Item";
+}
+
+async function updateTodoCompletion(todoId, isCompleted) {
+  try {
+    const response = await fetch(`/api/tasks/${todoId}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isCompleted })
+    });
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.message || "Could not update task status.");
+    }
+    if (!result.task || result.task.id !== todoId || result.task.isCompleted !== isCompleted) {
+      throw new Error("The server returned an invalid task status.");
+    }
+
+    if (isCompleted) {
+      state.todos = state.todos.filter((item) => item.id !== todoId);
+      state.completedTodos = [
+        ...state.completedTodos.filter((item) => item.id !== todoId),
+        toCompletedTodo(result.task)
+      ];
+    } else {
+      state.completedTodos = state.completedTodos.filter((item) => item.id !== todoId);
+      state.todos = [
+        ...state.todos.filter((item) => item.id !== todoId),
+        result.task
+      ];
+    }
+
+    render();
+    setTodoMessage(result.message, "success");
+  } catch (error) {
+    console.error("Task status update failed:", error);
+    renderTodoList();
+    setTodoMessage(error.message || "Could not update task status.", "error");
+  }
 }
 
 function completeTodo(todoId) {
-  const item = state.todos.find((entry) => entry.id === todoId);
-  if (!item) return;
+  updateTodoCompletion(todoId, true);
+}
 
-  state.todos = state.todos.filter((entry) => entry.id !== todoId);
-  state.completedTodos.push({
-    ...item,
-    completedDate: formatDateKey(new Date())
-  });
-
-  saveTodos();
-  saveCompletedTodos();
-  renderTodoList();
+function markTodoIncomplete(todoId) {
+  updateTodoCompletion(todoId, false);
 }
 
 function deleteTodo(todoId) {
-  state.todos = state.todos.filter((item) => item.id !== todoId);
-  saveTodos();
-  renderTodoList();
+  const item = state.todos.find((entry) => entry.id === todoId);
+  if (!item) return;
+
+  fetch(`/api/tasks/${todoId}`, { method: "DELETE" })
+    .then(async (response) => {
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || "Could not delete the task.");
+      }
+
+      state.todos = state.todos.filter((entry) => entry.id !== todoId);
+      render();
+      setTodoMessage(result.message, "success");
+    })
+    .catch((error) => {
+      console.error("Task deletion failed:", error);
+      renderTodoList();
+      setTodoMessage(error.message || "Could not delete the task.", "error");
+    });
+}
+
+function appendTodoNotes(container, item) {
+  if (!item.notes) return;
+
+  const notes = document.createElement("span");
+  notes.className = "todo-item-meta";
+  notes.textContent = `Notes: ${item.notes}`;
+  container.appendChild(notes);
 }
 
 function renderTodoList() {
@@ -1441,12 +1670,27 @@ function renderTodoList() {
 
           const text = document.createElement("div");
           text.className = "todo-item-text";
-          text.innerHTML = `
-            <span class="todo-item-title">${item.title}</span>
-            <span class="todo-item-meta">Completed on ${new Date(`${item.completedDate}T00:00:00`).toLocaleDateString()} · Original due ${new Date(`${item.date}T00:00:00`).toLocaleDateString()}</span>
-          `;
+          const title = document.createElement("span");
+          title.className = "todo-item-title";
+          title.textContent = item.title;
 
-          row.appendChild(text);
+          const completionMeta = document.createElement("span");
+          completionMeta.className = "todo-item-meta";
+          const originalDueDate = item.isAssignment ? item.dueDate : item.date;
+          completionMeta.textContent = `Completed on ${new Date(`${item.completedDate}T00:00:00`).toLocaleDateString()} · Original due ${new Date(`${originalDueDate}T00:00:00`).toLocaleDateString()}${item.className ? ` · ${item.className}` : ""}`;
+          text.append(title, completionMeta);
+          appendTodoNotes(text, item);
+
+          const actions = document.createElement("div");
+          actions.className = "todo-item-actions";
+          const reopenButton = document.createElement("button");
+          reopenButton.type = "button";
+          reopenButton.className = "todo-button";
+          reopenButton.textContent = "Mark incomplete";
+          reopenButton.addEventListener("click", () => markTodoIncomplete(item.id));
+          actions.appendChild(reopenButton);
+
+          row.append(text, actions);
           items.appendChild(row);
         });
 
@@ -1503,12 +1747,27 @@ function renderTodoList() {
 
       const text = document.createElement("div");
       text.className = "todo-item-text";
-      const assignmentBadge = isAssignment ? '<span class="todo-item-badge">Assignment</span>' : "";
-      const dueSoonBadge = isAssignment && isDueSoon ? '<span class="todo-item-due-soon">Due soon</span>' : "";
-      text.innerHTML = `
-        <span class="todo-item-title">${assignmentBadge}${item.title}${dueSoonBadge}</span>
-        <span class="todo-item-meta">${buildTodoMetaText(item)}</span>
-      `;
+      const title = document.createElement("span");
+      title.className = "todo-item-title";
+      if (isAssignment) {
+        const assignmentBadge = document.createElement("span");
+        assignmentBadge.className = "todo-item-badge";
+        assignmentBadge.textContent = "Assignment";
+        title.appendChild(assignmentBadge);
+      }
+      title.appendChild(document.createTextNode(item.title));
+      if (isDueSoon) {
+        const dueSoonBadge = document.createElement("span");
+        dueSoonBadge.className = "todo-item-due-soon";
+        dueSoonBadge.textContent = "Due soon";
+        title.appendChild(dueSoonBadge);
+      }
+
+      const meta = document.createElement("span");
+      meta.className = "todo-item-meta";
+      meta.textContent = buildTodoMetaText(item);
+      text.append(title, meta);
+      appendTodoNotes(text, item);
 
       const actions = document.createElement("div");
       actions.className = "todo-item-actions";
@@ -1540,12 +1799,20 @@ function bindTodoControls() {
   const todoDatePicker = document.getElementById("todo-date-picker");
   const todoKindSelect = document.getElementById("todo-kind-select");
   const todoType = document.getElementById("todo-type");
+  const todoClassSelect = document.getElementById("todo-class-id");
   const todoForm = document.getElementById("todo-form");
   const todoCancelEdit = document.getElementById("todo-cancel-edit");
 
   if (todoType) {
     todoType.addEventListener("change", () => {
       toggleAssignmentFields();
+    });
+    toggleAssignmentFields();
+  }
+
+  if (todoClassSelect) {
+    todoClassSelect.addEventListener("change", () => {
+      state.todoClassSelection = todoClassSelect.value;
     });
   }
 
@@ -1598,14 +1865,16 @@ function bindTodoControls() {
   });
 
   if (todoForm) {
-    todoForm.addEventListener("submit", (event) => {
+    todoForm.addEventListener("submit", async (event) => {
       event.preventDefault();
 
       const title = document.getElementById("todo-title").value.trim();
       const itemType = document.getElementById("todo-type").value;
       const taskDate = document.getElementById("todo-date").value;
+      const notes = document.getElementById("todo-notes").value.trim();
       const dueDate = document.getElementById("todo-due-date").value;
       const dueTime = document.getElementById("todo-due-time").value;
+      const classId = Number(document.getElementById("todo-class-id").value) || null;
       const reminderDays = Number(document.getElementById("todo-reminder-days").value || 0);
       const isAssignment = itemType === "assignment";
       const entryDate = isAssignment ? dueDate : taskDate;
@@ -1639,8 +1908,8 @@ function bindTodoControls() {
 
       const reminderDate = isAssignment ? getAssignmentReminderDate(dueDate, reminderDays) : null;
       const todoRecord = {
-        id: state.todoEditingId || Date.now(),
         title,
+        notes,
         date: isAssignment ? reminderDate || dueDate : entryDate,
         originalDate: null,
         createdDate: isAssignment ? dueDate : entryDate,
@@ -1648,36 +1917,52 @@ function bindTodoControls() {
         dueDate: isAssignment ? dueDate : "",
         dueTime: isAssignment ? dueTime : "",
         reminderDays: isAssignment ? reminderDays : 0,
-        reminderDate
+        reminderDate,
+        classId: isAssignment ? classId : null
       };
 
-      if (state.todoEditingId) {
-        state.todos = state.todos.map((item) =>
-          item.id === state.todoEditingId
-            ? { ...item, ...todoRecord, originalDate: item.originalDate || item.date }
-            : item
-        );
-      } else {
-        state.todos.push(todoRecord);
+      const editingId = state.todoEditingId;
+      const submitButton = todoForm.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
+      setTodoMessage(editingId ? "Saving changes..." : "Saving task...");
+
+      try {
+        const response = await fetch(editingId ? `/api/tasks/${editingId}` : "/api/tasks", {
+          method: editingId ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(getTodoRequestBody(todoRecord))
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.message || "Could not save the task.");
+        }
+        if (!result.task || !Number.isSafeInteger(result.task.id)) {
+          throw new Error("The server returned an invalid saved task.");
+        }
+
+        if (editingId) {
+          state.todos = state.todos.map((item) => item.id === editingId ? result.task : item);
+        } else {
+          state.todos.push(result.task);
+        }
+
+        const displayDate = new Date(`${result.task.date}T00:00:00`);
+        state.todoSelectedDate = displayDate;
+        const picker = document.getElementById("todo-date-picker");
+        if (picker) picker.value = formatDateKey(displayDate);
+        const dueField = document.getElementById("todo-date");
+        if (dueField) dueField.value = formatDateKey(displayDate);
+
+        resetTodoForm();
+        render();
+        setTodoMessage(result.message || "Task saved successfully.", "success");
+      } catch (error) {
+        console.error("Task save failed:", error);
+        setTodoMessage(error.message || "Could not save the task.", "error");
+      } finally {
+        if (submitButton) submitButton.disabled = false;
       }
-
-      saveTodos();
-
-      const displayDate = isAssignment && reminderDate ? new Date(`${reminderDate}T00:00:00`) : new Date(`${entryDate}T00:00:00`);
-      state.todoSelectedDate = displayDate;
-
-      const picker = document.getElementById("todo-date-picker");
-      if (picker) {
-        picker.value = formatDateKey(displayDate);
-      }
-
-      const dueField = document.getElementById("todo-date");
-      if (dueField) {
-        dueField.value = formatDateKey(displayDate);
-      }
-
-      resetTodoForm();
-      renderTodoList();
     });
   }
 
@@ -1998,6 +2283,15 @@ async function deleteClass(classRecord) {
     }
 
     state.classes = state.classes.filter((item) => item.id !== classRecord.id);
+    state.todos = state.todos.map((item) => item.classId === classRecord.id
+      ? { ...item, classId: null, className: "" }
+      : item);
+    state.completedTodos = state.completedTodos.map((item) => item.classId === classRecord.id
+      ? { ...item, classId: null, className: "" }
+      : item);
+    if (state.todoClassSelection === String(classRecord.id)) {
+      state.todoClassSelection = "";
+    }
     state.classLoadError = null;
     if (state.editingClassId === classRecord.id) {
       resetClassForm();
@@ -2197,6 +2491,12 @@ function bindClassForm() {
         state.classes = state.classes.map((classRecord) =>
           classRecord.id === editingId ? result.class : classRecord
         );
+        state.todos = state.todos.map((item) => item.classId === editingId
+          ? { ...item, className: result.class.name }
+          : item);
+        state.completedTodos = state.completedTodos.map((item) => item.classId === editingId
+          ? { ...item, className: result.class.name }
+          : item);
       }
       state.classLoadError = null;
       resetClassForm();
@@ -2220,8 +2520,6 @@ function init() {
   state.events = loadEvents();
   state.categories = loadCategories();
   state.selectedCategories = new Set(getAllCategories().map((option) => option.value));
-  state.todos = loadTodos();
-  state.completedTodos = loadCompletedTodos();
   state.todoSelectedDate = new Date();
   setSelectedDate(new Date());
   state.weekStart = getStartOfWeek(new Date());
@@ -2235,6 +2533,15 @@ function init() {
   bindWeekPicker();
   bindTodoControls();
   render();
+  setTodoMessage("Loading tasks...");
+  loadTodos().then(() => {
+    advanceOverdueTodos();
+    render();
+    setTodoMessage("");
+  }).catch((error) => {
+    console.error("Task loading failed:", error);
+    setTodoMessage("Could not load tasks. Please refresh and try again.", "error");
+  });
   loadSemesters().then(async () => {
     try {
       await loadClasses();
