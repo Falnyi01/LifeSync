@@ -197,11 +197,21 @@ test("creates, updates, and deletes a class for the signed-in user", async () =>
     semesterEndDate: "2026-12-15"
   });
 
+  const savedScheduleResponse = await send("/api/classes", { cookie: user.cookie });
+  assert.equal(savedScheduleResponse.status, 200);
+  const savedSchedule = await savedScheduleResponse.json();
+  assert.deepEqual(savedSchedule.classes, [updated.class]);
+
   const deleteResponse = await send(`/api/classes/${created.id}`, {
     method: "DELETE",
     cookie: user.cookie
   });
   assert.equal(deleteResponse.status, 200);
+
+  const remainingSchedulesResponse = await send("/api/classes", { cookie: user.cookie });
+  assert.equal(remainingSchedulesResponse.status, 200);
+  const remainingSchedules = await remainingSchedulesResponse.json();
+  assert.deepEqual(remainingSchedules.classes, []);
 });
 
 test("rejects unauthenticated and invalid class requests", async () => {
@@ -250,7 +260,7 @@ test("prevents users from editing or deleting another user's class", async () =>
   assert.equal(deleteResponse.status, 404);
 });
 
-test("lists only the signed-in user's classes with their semester dates", async () => {
+test("retrieves saved schedules only for the signed-in user", async () => {
   const owner = await createLoggedInUser();
   const created = await createClass(owner);
   const otherUser = await createLoggedInUser();

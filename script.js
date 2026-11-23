@@ -78,6 +78,8 @@ const state = {
   selectedSemesterId: null,
   classFormSemesterId: null,
   editingSemesterId: null,
+  editingClassId: null,
+  classLoadError: null,
   weeklyStartHour: 6,
   weeklyEndHour: 22
 };
@@ -848,6 +850,7 @@ function render() {
   renderDayView();
   renderWeeklyPlanner();
   renderTodoList();
+  renderClasses();
 
   const dateInput = document.getElementById("event-date");
   if (dateInput) {
@@ -1869,6 +1872,142 @@ async function loadClasses() {
   }
 
   state.classes = result.classes;
+  state.classLoadError = null;
+}
+
+function renderClasses() {
+  const list = document.getElementById("class-list");
+  if (!list) return;
+
+  list.replaceChildren();
+
+  if (state.classLoadError) {
+    const errorMessage = document.createElement("p");
+    errorMessage.className = "auth-message error";
+    errorMessage.textContent = state.classLoadError;
+    list.appendChild(errorMessage);
+    return;
+  }
+
+  if (state.classes.length === 0) {
+    const emptyMessage = document.createElement("p");
+    emptyMessage.className = "empty-week";
+    emptyMessage.textContent = "No saved classes yet. Add one using the form above.";
+    list.appendChild(emptyMessage);
+    return;
+  }
+
+  state.classes.forEach((classRecord) => {
+    const item = document.createElement("article");
+    item.className = "todo-item class-item";
+    item.setAttribute("role", "listitem");
+
+    const details = document.createElement("div");
+    details.className = "todo-item-text";
+
+    const name = document.createElement("span");
+    name.className = "todo-item-title";
+    name.textContent = classRecord.name;
+
+    const schedule = document.createElement("span");
+    schedule.className = "todo-item-meta";
+    schedule.textContent = `${classRecord.meetingDays.join(", ")} · ${formatTime(classRecord.startTime)} - ${formatTime(classRecord.endTime)}`;
+
+    const semester = state.semesters.find((entry) => entry.id === classRecord.semesterId);
+    const semesterDetails = document.createElement("span");
+    semesterDetails.className = "todo-item-meta";
+    semesterDetails.textContent = semester
+      ? `${semester.name} · ${formatSemesterDate(semester.startDate)} - ${formatSemesterDate(semester.endDate)}`
+      : "No semester assigned";
+
+    const location = document.createElement("span");
+    location.className = "todo-item-meta";
+    location.textContent = `Location: ${classRecord.location}`;
+    details.append(name, schedule, semesterDetails, location);
+
+    const actions = document.createElement("div");
+    actions.className = "todo-item-actions";
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "todo-button";
+    editButton.textContent = "Edit";
+    editButton.addEventListener("click", () => startEditClass(classRecord));
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "todo-button";
+    deleteButton.textContent = "Delete";
+    deleteButton.addEventListener("click", () => deleteClass(classRecord));
+
+    actions.append(editButton, deleteButton);
+    item.append(details, actions);
+    list.appendChild(item);
+  });
+}
+
+function setClassMessage(text, status = "") {
+  const message = document.getElementById("class-form-message");
+  if (!message) return;
+
+  message.textContent = text;
+  message.className = status ? `auth-message ${status}` : "auth-message";
+}
+
+function resetClassForm() {
+  const form = document.getElementById("class-form");
+  if (!form) return;
+
+  form.reset();
+  state.editingClassId = null;
+  document.getElementById("class-form-title").textContent = "Add a Class";
+  document.getElementById("class-submit-button").textContent = "Add Class";
+  document.getElementById("class-cancel-edit").classList.add("hidden");
+  renderClassSemesterOptions();
+}
+
+function startEditClass(classRecord) {
+  state.editingClassId = classRecord.id;
+  state.classFormSemesterId = classRecord.semesterId || state.selectedSemesterId;
+  renderClassSemesterOptions();
+
+  document.getElementById("class-name").value = classRecord.name;
+  document.getElementById("class-start-time").value = classRecord.startTime;
+  document.getElementById("class-end-time").value = classRecord.endTime;
+  document.getElementById("class-location").value = classRecord.location;
+  document.querySelectorAll('#class-form input[name="meetingDays"]').forEach((input) => {
+    input.checked = classRecord.meetingDays.includes(input.value);
+  });
+  document.getElementById("class-form-title").textContent = "Edit Class";
+  document.getElementById("class-submit-button").textContent = "Save Changes";
+  document.getElementById("class-cancel-edit").classList.remove("hidden");
+  setClassMessage("");
+  document.getElementById("class-name").focus();
+}
+
+async function deleteClass(classRecord) {
+  if (!window.confirm(`Delete "${classRecord.name}"?`)) return;
+
+  try {
+    const response = await fetch(`/api/classes/${classRecord.id}`, { method: "DELETE" });
+    const result = await response.json();
+
+    if (!response.ok) {
+      setClassMessage(result.message || "Could not delete the class.", "error");
+      return;
+    }
+
+    state.classes = state.classes.filter((item) => item.id !== classRecord.id);
+    state.classLoadError = null;
+    if (state.editingClassId === classRecord.id) {
+      resetClassForm();
+    }
+    render();
+    setClassMessage(result.message, "success");
+  } catch (error) {
+    console.error("Class deletion failed:", error);
+    setClassMessage("Could not connect to LifeSync. Please try again.", "error");
+  }
 }
 
 function resetSemesterForm() {
@@ -2010,10 +2149,10 @@ function bindSemesterForm() {
 
 function bindClassForm() {
   const form = document.getElementById("class-form");
-  const message = document.getElementById("class-form-message");
   const submitButton = document.getElementById("class-submit-button");
+  const cancelButton = document.getElementById("class-cancel-edit");
   const semesterSelect = document.getElementById("class-semester");
-  if (!form || !message || !submitButton || !semesterSelect) return;
+  if (!form || !submitButton || !cancelButton || !semesterSelect) return;
 
   semesterSelect.addEventListener("change", () => {
     state.classFormSemesterId = Number(semesterSelect.value) || null;
@@ -2023,8 +2162,7 @@ function bindClassForm() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     submitButton.disabled = true;
-    message.textContent = "Saving class...";
-    message.className = "auth-message";
+    setClassMessage(state.editingClassId === null ? "Saving class..." : "Updating class.");
 
     const classDetails = {
       name: document.getElementById("class-name").value,
@@ -2035,34 +2173,46 @@ function bindClassForm() {
       endTime: document.getElementById("class-end-time").value,
       location: document.getElementById("class-location").value
     };
+    const editingId = state.editingClassId;
 
     try {
-      const response = await fetch("/api/classes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(classDetails)
-      });
+      const response = await fetch(
+        editingId === null ? "/api/classes" : `/api/classes/${editingId}`,
+        {
+          method: editingId === null ? "POST" : "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(classDetails)
+        }
+      );
       const result = await response.json();
 
       if (!response.ok) {
-        message.textContent = result.message || "Could not save the class.";
-        message.className = "auth-message error";
+        setClassMessage(result.message || "Could not save the class.", "error");
         return;
       }
 
-      state.classes.push(result.class);
-      form.reset();
-      renderClassSemesterOptions();
+      if (editingId === null) {
+        state.classes.push(result.class);
+      } else {
+        state.classes = state.classes.map((classRecord) =>
+          classRecord.id === editingId ? result.class : classRecord
+        );
+      }
+      state.classLoadError = null;
+      resetClassForm();
       render();
-      message.textContent = result.message;
-      message.className = "auth-message success";
+      setClassMessage(result.message, "success");
     } catch (error) {
       console.error("Class save failed:", error);
-      message.textContent = "Could not connect to LifeSync. Please try again.";
-      message.className = "auth-message error";
+      setClassMessage("Could not connect to LifeSync. Please try again.", "error");
     } finally {
-      submitButton.disabled = false;
+      submitButton.disabled = !semesterSelect.value;
     }
+  });
+
+  cancelButton.addEventListener("click", () => {
+    resetClassForm();
+    setClassMessage("");
   });
 }
 
@@ -2090,20 +2240,19 @@ function init() {
       await loadClasses();
     } catch (error) {
       console.error("Class loading failed:", error);
-      const message = document.getElementById("class-form-message");
-      if (message) {
-        message.textContent = "Could not load classes. Please refresh and try again.";
-        message.className = "auth-message error";
-      }
+      state.classLoadError = "Could not load classes. Please refresh and try again.";
+      setClassMessage(state.classLoadError, "error");
     }
     render();
   }).catch((error) => {
     console.error("Semester loading failed:", error);
+    state.classLoadError = "Could not load classes because semester data is unavailable.";
     const list = document.getElementById("semester-list");
     if (list) {
       list.textContent = "Could not load semesters. Please refresh and try again.";
     }
     setSemesterMessage("Could not load semesters. Please refresh and try again.", "error");
+    renderClasses();
   });
 }
 
