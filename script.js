@@ -266,9 +266,10 @@ function renderPeriodLabel() {
 
 function getEventsForDate(dateString) {
   const classEvents = getClassEventsForDate(dateString);
+  const taskEvents = getTodoCalendarEventsForDate(dateString);
   return state.events
     .filter((event) => event.date === dateString)
-    .concat(classEvents)
+    .concat(classEvents, taskEvents)
     .sort((a, b) => a.start.localeCompare(b.start));
 }
 
@@ -297,13 +298,35 @@ function getClassEventsForDate(dateString) {
     }));
 }
 
+function getTodoCalendarEventsForDate(dateString) {
+  return state.todos
+    .filter((item) => getTodoDisplayDate(item) === dateString)
+    .map((item) => ({
+      id: `todo-${item.id}`,
+      todoId: item.id,
+      isTodo: true,
+      isAssignment: item.isAssignment,
+      title: item.title,
+      date: dateString,
+      start: "00:00",
+      end: "00:00",
+      category: item.isAssignment ? "assignment" : "personal",
+      color: getCategoryColor(item.isAssignment ? "assignment" : "personal"),
+      dueDate: item.dueDate,
+      dueTime: item.dueTime,
+      classId: item.classId,
+      className: item.className
+    }));
+}
+
 function getEventsForRange(startDate, endDate) {
   const events = state.events.filter((event) => event.date >= startDate && event.date <= endDate);
   const date = new Date(`${startDate}T00:00:00`);
   const finalDate = new Date(`${endDate}T00:00:00`);
 
   while (date <= finalDate) {
-    events.push(...getClassEventsForDate(formatDateForInput(date)));
+    const dateKey = formatDateForInput(date);
+    events.push(...getClassEventsForDate(dateKey), ...getTodoCalendarEventsForDate(dateKey));
     date.setDate(date.getDate() + 1);
   }
 
@@ -312,8 +335,9 @@ function getEventsForRange(startDate, endDate) {
 
 function buildEventPill(event) {
   const styles = getEventDisplayStyles(event);
-  const pill = document.createElement(event.classId ? "span" : "button");
-  if (!event.classId) {
+  const isReadOnlyClass = event.classId && !event.isTodo;
+  const pill = document.createElement(isReadOnlyClass ? "span" : "button");
+  if (!isReadOnlyClass) {
     pill.type = "button";
   }
   pill.className = "event-pill";
@@ -321,7 +345,12 @@ function buildEventPill(event) {
   pill.style.borderColor = styles.borderColor;
   pill.style.color = styles.color;
   pill.textContent = event.title;
-  if (!event.classId) {
+  if (event.isTodo) {
+    pill.addEventListener("click", (eventClick) => {
+      eventClick.stopPropagation();
+      startEditTodo(event.todoId);
+    });
+  } else if (!event.classId) {
     pill.addEventListener("click", (eventClick) => {
       eventClick.stopPropagation();
       startEditEvent(event.id);
@@ -488,10 +517,22 @@ function createEventCard(event) {
   title.textContent = event.title;
 
   const category = document.createElement("div");
-  category.textContent = event.category;
+  category.textContent = event.isTodo
+    ? event.isAssignment ? "Assignment reminder" : "Personal task"
+    : event.category;
 
   const time = document.createElement("div");
-  time.textContent = `${formatTime(event.start)} - ${formatTime(event.end)}`;
+  if (event.isTodo) {
+    const classLabel = event.className ? ` · ${event.className}` : "";
+    if (event.isAssignment) {
+      const dueDate = new Date(`${event.dueDate}T00:00:00`).toLocaleDateString();
+      time.textContent = `Reminder · due ${dueDate} at ${formatTime(event.dueTime)}${classLabel}`;
+    } else {
+      time.textContent = `All day${classLabel}`;
+    }
+  } else {
+    time.textContent = `${formatTime(event.start)} - ${formatTime(event.end)}`;
+  }
 
   card.append(title, category, time);
 
@@ -501,7 +542,7 @@ function createEventCard(event) {
     card.appendChild(location);
   }
 
-  if (event.classId) {
+  if (event.classId && !event.isTodo) {
     card.classList.add("class-event");
     return card;
   }
@@ -513,13 +554,25 @@ function createEventCard(event) {
   editButton.type = "button";
   editButton.className = "event-action";
   editButton.textContent = "Edit";
-  editButton.addEventListener("click", () => startEditEvent(event.id));
+  editButton.addEventListener("click", () => {
+    if (event.isTodo) {
+      startEditTodo(event.todoId);
+    } else {
+      startEditEvent(event.id);
+    }
+  });
 
   const deleteButton = document.createElement("button");
   deleteButton.type = "button";
   deleteButton.className = "event-action";
   deleteButton.textContent = "Delete";
-  deleteButton.addEventListener("click", () => deleteEvent(event.id));
+  deleteButton.addEventListener("click", () => {
+    if (event.isTodo) {
+      deleteTodo(event.todoId);
+    } else {
+      deleteEvent(event.id);
+    }
+  });
 
   actions.append(editButton, deleteButton);
   card.appendChild(actions);
@@ -580,8 +633,9 @@ function renderWeeklySummary() {
   const visibleDates = getVisibleWeekDates();
   const visibleHours = state.weeklyEndHour - state.weeklyStartHour;
   const selectedEvents = getFilteredWeeklyEvents();
+  const scheduledEvents = selectedEvents.filter((event) => !event.isTodo);
 
-  const eventTotals = selectedEvents.map((event) => ({
+  const eventTotals = scheduledEvents.map((event) => ({
     title: event.title,
     duration: getExactDurationMinutes(event.start, event.end),
     date: event.date
@@ -589,7 +643,7 @@ function renderWeeklySummary() {
 
   const dayTotals = visibleDates.map((date) => {
     const dateKey = formatDateForInput(date);
-    const dayEvents = selectedEvents.filter((event) => event.date === dateKey);
+    const dayEvents = scheduledEvents.filter((event) => event.date === dateKey);
     const busyMinutes = dayEvents.reduce(
       (total, event) => total + getEventMinutesWithinRange(event, state.weeklyStartHour, state.weeklyEndHour),
       0
@@ -738,6 +792,24 @@ function renderWeeklyPlanner() {
 
   scheduleGrid.appendChild(header);
 
+  const allDayRow = document.createElement("div");
+  allDayRow.className = "schedule-all-day-row";
+  const allDayLabel = document.createElement("div");
+  allDayLabel.className = "schedule-all-day-label";
+  allDayLabel.textContent = "All day";
+  allDayRow.appendChild(allDayLabel);
+
+  weekDates.forEach((date) => {
+    const dateKey = formatDateForInput(date);
+    const cell = document.createElement("div");
+    cell.className = "schedule-all-day-cell";
+    selectedEvents
+      .filter((event) => event.isTodo && event.date === dateKey)
+      .forEach((event) => cell.appendChild(createEventCard(event)));
+    allDayRow.appendChild(cell);
+  });
+  scheduleGrid.appendChild(allDayRow);
+
   const body = document.createElement("div");
   body.className = "weekly-grid-body";
 
@@ -757,7 +829,7 @@ function renderWeeklyPlanner() {
   weekDates.forEach((date) => {
     const dateKey = formatDateForInput(date);
     const dayEvents = selectedEvents
-      .filter((event) => event.date === dateKey)
+      .filter((event) => !event.isTodo && event.date === dateKey)
       .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
 
     const dayColumn = document.createElement("div");
@@ -1414,6 +1486,8 @@ function startEditTodo(todoId) {
   const item = state.todos.find((entry) => entry.id === todoId);
   if (!item) return;
 
+  const shouldOpenTodoTab = state.activeTab !== "todo";
+  state.activeTab = "todo";
   state.todoEditingId = todoId;
   document.getElementById("todo-title").value = item.title;
   document.getElementById("todo-type").value = item.isAssignment ? "assignment" : "task";
@@ -1426,6 +1500,9 @@ function startEditTodo(todoId) {
   renderAssignmentClassOptions();
   toggleAssignmentFields();
   document.getElementById("todo-cancel-edit").classList.remove("hidden");
+  if (shouldOpenTodoTab) {
+    render();
+  }
 }
 
 function resetTodoForm() {
@@ -1460,7 +1537,7 @@ function completeTodo(todoId) {
         completedDate: formatDateKey(new Date())
       });
       saveCompletedTodos();
-      renderTodoList();
+      render();
       setTodoMessage("Item marked complete.", "success");
     })
     .catch((error) => {
@@ -1482,7 +1559,7 @@ function deleteTodo(todoId) {
       }
 
       state.todos = state.todos.filter((entry) => entry.id !== todoId);
-      renderTodoList();
+      render();
       setTodoMessage(result.message, "success");
     })
     .catch((error) => {
@@ -1862,7 +1939,7 @@ function bindTodoControls() {
         if (dueField) dueField.value = formatDateKey(displayDate);
 
         resetTodoForm();
-        renderTodoList();
+        render();
         setTodoMessage(result.message || "Task saved successfully.", "success");
       } catch (error) {
         console.error("Task save failed:", error);
@@ -2445,7 +2522,7 @@ function init() {
   setTodoMessage("Loading tasks...");
   loadTodos().then(() => {
     advanceOverdueTodos();
-    renderTodoList();
+    render();
     setTodoMessage("");
   }).catch((error) => {
     console.error("Task loading failed:", error);

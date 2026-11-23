@@ -538,7 +538,8 @@ textarea {
 }
 
 .weekly-grid-header,
-.weekly-grid-body {
+.weekly-grid-body,
+.schedule-all-day-row {
   display: grid;
   grid-template-columns: 160px repeat(7, minmax(130px, 1fr));
 }
@@ -568,6 +569,25 @@ textarea {
 .schedule-day-header {
   position: sticky;
   top: 0;
+}
+
+.schedule-all-day-label,
+.schedule-all-day-cell {
+  border: 1px solid var(--border);
+  padding: 6px;
+  background: rgba(15, 23, 42, 0.92);
+}
+
+.schedule-all-day-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+  font-weight: 700;
+}
+
+.schedule-all-day-cell .week-event {
+  margin-bottom: 6px;
+  padding: 6px;
 }
 
 .schedule-time-column,
