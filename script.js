@@ -758,6 +758,7 @@ function render() {
   const weeklyPanel = document.getElementById("weekly-panel");
   const todoPanel = document.getElementById("todo-panel");
   const semesterPanel = document.getElementById("semester-panel");
+  const classesPanel = document.getElementById("classes-panel");
 
   if (calendarPanel) {
     calendarPanel.classList.toggle("hidden", state.activeTab !== "calendar");
@@ -773,6 +774,10 @@ function render() {
 
   if (semesterPanel) {
     semesterPanel.classList.toggle("hidden", state.activeTab !== "semester");
+  }
+
+  if (classesPanel) {
+    classesPanel.classList.toggle("hidden", state.activeTab !== "classes");
   }
 
   document.querySelectorAll(".tab-button").forEach((button) => {
