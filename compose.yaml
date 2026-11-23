@@ -1,0 +1,26 @@
+services:
+  lifesync:
+    build: .
+    image: lifesync:local
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: "${NODE_ENV:-development}"
+      PORT: "3000"
+      SESSION_SECRET: "${SESSION_SECRET:?Set SESSION_SECRET in .env}"
+      LIFESYNC_DATABASE_PATH: /app/data/lifesync.db
+    volumes:
+      - lifesync-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:http').get('http://127.0.0.1:3000/healthz', response => process.exit(response.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  lifesync-data:
