@@ -1,5 +1,6 @@
 const STORAGE_KEY = "student-planner-events-v1";
 const CATEGORY_KEY = "student-planner-categories-v1";
+const COMPLETED_TODO_KEY_PREFIX = "student-planner-completed-v1";
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const fullDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -73,6 +74,7 @@ const state = {
   todoKind: "all",
   todos: [],
   completedTodos: [],
+  todoStorageUserId: null,
   semesters: [],
   classes: [],
   selectedSemesterId: null,
@@ -1163,21 +1165,33 @@ function applyTodoDateBounds() {
   }
 }
 
-function loadTodos() {
-  const saved = localStorage.getItem("student-planner-todos-v1");
-  if (!saved) return [];
+async function loadTodos() {
+  const response = await fetch("/api/tasks");
+  const result = await response.json();
 
-  try {
-    const parsed = JSON.parse(saved);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error("Failed to load todos.", error);
-    return [];
+  if (!response.ok) {
+    throw new Error(result.message || "Could not load tasks.");
   }
+  if (!result || !Number.isSafeInteger(result.userId) || !Array.isArray(result.tasks)) {
+    throw new Error("The server returned an invalid task list.");
+  }
+
+  state.todoStorageUserId = result.userId;
+  state.todos = result.tasks;
+  state.completedTodos = loadCompletedTodos();
+}
+
+function getCompletedTodosStorageKey() {
+  return state.todoStorageUserId
+    ? `${COMPLETED_TODO_KEY_PREFIX}-${state.todoStorageUserId}`
+    : null;
 }
 
 function loadCompletedTodos() {
-  const saved = localStorage.getItem("student-planner-completed-v1");
+  const key = getCompletedTodosStorageKey();
+  if (!key) return [];
+
+  const saved = localStorage.getItem(key);
   if (!saved) return [];
 
   try {
@@ -1189,36 +1203,76 @@ function loadCompletedTodos() {
   }
 }
 
-function saveTodos() {
-  localStorage.setItem("student-planner-todos-v1", JSON.stringify(state.todos));
+function getTodoRequestBody(item) {
+  return {
+    type: item.isAssignment ? "assignment" : "task",
+    title: item.title,
+    notes: item.notes || "",
+    taskDate: item.isAssignment ? "" : item.date,
+    dueDate: item.isAssignment ? item.dueDate : "",
+    dueTime: item.isAssignment ? item.dueTime : "",
+    reminderDays: item.isAssignment ? item.reminderDays : 0
+  };
+}
+
+async function saveTodos(tasks = state.todos) {
+  try {
+    await Promise.all(tasks.map(async (item) => {
+      const response = await fetch(`/api/tasks/${item.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(getTodoRequestBody(item))
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || "Could not save a task update.");
+      }
+    }));
+  } catch (error) {
+    console.error("Task date update failed:", error);
+    setTodoMessage("Could not update an overdue task. Please refresh and try again.", "error");
+  }
 }
 
 function saveCompletedTodos() {
-  localStorage.setItem("student-planner-completed-v1", JSON.stringify(state.completedTodos));
+  const key = getCompletedTodosStorageKey();
+  if (key) {
+    localStorage.setItem(key, JSON.stringify(state.completedTodos));
+  }
+}
+
+function setTodoMessage(text, status = "") {
+  const message = document.getElementById("todo-form-message");
+  if (!message) return;
+
+  message.textContent = text;
+  message.className = status ? `auth-message ${status}` : "auth-message";
 }
 
 function advanceOverdueTodos() {
   const today = new Date();
   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const todayKey = formatDateKey(todayStart);
-  let changed = false;
+  const shiftedTasks = [];
 
   state.todos = state.todos.map((item) => {
     const taskDate = new Date(`${item.date}T00:00:00`);
-    if (taskDate < todayStart) {
-      changed = true;
-      const nextDate = addDays(taskDate, 1);
-      return {
+    if (!item.isAssignment && taskDate < todayStart) {
+      const nextDate = new Date(todayStart);
+      const updatedTask = {
         ...item,
         date: formatDateKey(nextDate),
         originalDate: item.originalDate || item.date
       };
+      shiftedTasks.push(updatedTask);
+      return updatedTask;
     }
     return item;
   });
 
-  if (changed) {
-    saveTodos();
+  if (shiftedTasks.length) {
+    saveTodos(shiftedTasks);
   }
 
   if (state.todoSelectedDate < todayStart) {
@@ -1360,21 +1414,49 @@ function completeTodo(todoId) {
   const item = state.todos.find((entry) => entry.id === todoId);
   if (!item) return;
 
-  state.todos = state.todos.filter((entry) => entry.id !== todoId);
-  state.completedTodos.push({
-    ...item,
-    completedDate: formatDateKey(new Date())
-  });
+  fetch(`/api/tasks/${todoId}`, { method: "DELETE" })
+    .then(async (response) => {
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || "Could not complete the task.");
+      }
 
-  saveTodos();
-  saveCompletedTodos();
-  renderTodoList();
+      state.todos = state.todos.filter((entry) => entry.id !== todoId);
+      state.completedTodos.push({
+        ...item,
+        completedDate: formatDateKey(new Date())
+      });
+      saveCompletedTodos();
+      renderTodoList();
+      setTodoMessage("Item marked complete.", "success");
+    })
+    .catch((error) => {
+      console.error("Task completion failed:", error);
+      renderTodoList();
+      setTodoMessage(error.message || "Could not complete the task.", "error");
+    });
 }
 
 function deleteTodo(todoId) {
-  state.todos = state.todos.filter((item) => item.id !== todoId);
-  saveTodos();
-  renderTodoList();
+  const item = state.todos.find((entry) => entry.id === todoId);
+  if (!item) return;
+
+  fetch(`/api/tasks/${todoId}`, { method: "DELETE" })
+    .then(async (response) => {
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.message || "Could not delete the task.");
+      }
+
+      state.todos = state.todos.filter((entry) => entry.id !== todoId);
+      renderTodoList();
+      setTodoMessage(result.message, "success");
+    })
+    .catch((error) => {
+      console.error("Task deletion failed:", error);
+      renderTodoList();
+      setTodoMessage(error.message || "Could not delete the task.", "error");
+    });
 }
 
 function appendTodoNotes(container, item) {
@@ -1650,7 +1732,7 @@ function bindTodoControls() {
   });
 
   if (todoForm) {
-    todoForm.addEventListener("submit", (event) => {
+    todoForm.addEventListener("submit", async (event) => {
       event.preventDefault();
 
       const title = document.getElementById("todo-title").value.trim();
@@ -1692,7 +1774,6 @@ function bindTodoControls() {
 
       const reminderDate = isAssignment ? getAssignmentReminderDate(dueDate, reminderDays) : null;
       const todoRecord = {
-        id: state.todoEditingId || Date.now(),
         title,
         notes,
         date: isAssignment ? reminderDate || dueDate : entryDate,
@@ -1705,33 +1786,48 @@ function bindTodoControls() {
         reminderDate
       };
 
-      if (state.todoEditingId) {
-        state.todos = state.todos.map((item) =>
-          item.id === state.todoEditingId
-            ? { ...item, ...todoRecord, originalDate: item.originalDate || item.date }
-            : item
-        );
-      } else {
-        state.todos.push(todoRecord);
+      const editingId = state.todoEditingId;
+      const submitButton = todoForm.querySelector('button[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
+      setTodoMessage(editingId ? "Saving changes..." : "Saving task...");
+
+      try {
+        const response = await fetch(editingId ? `/api/tasks/${editingId}` : "/api/tasks", {
+          method: editingId ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(getTodoRequestBody(todoRecord))
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.message || "Could not save the task.");
+        }
+        if (!result.task || !Number.isSafeInteger(result.task.id)) {
+          throw new Error("The server returned an invalid saved task.");
+        }
+
+        if (editingId) {
+          state.todos = state.todos.map((item) => item.id === editingId ? result.task : item);
+        } else {
+          state.todos.push(result.task);
+        }
+
+        const displayDate = new Date(`${result.task.date}T00:00:00`);
+        state.todoSelectedDate = displayDate;
+        const picker = document.getElementById("todo-date-picker");
+        if (picker) picker.value = formatDateKey(displayDate);
+        const dueField = document.getElementById("todo-date");
+        if (dueField) dueField.value = formatDateKey(displayDate);
+
+        resetTodoForm();
+        renderTodoList();
+        setTodoMessage(result.message || "Task saved successfully.", "success");
+      } catch (error) {
+        console.error("Task save failed:", error);
+        setTodoMessage(error.message || "Could not save the task.", "error");
+      } finally {
+        if (submitButton) submitButton.disabled = false;
       }
-
-      saveTodos();
-
-      const displayDate = isAssignment && reminderDate ? new Date(`${reminderDate}T00:00:00`) : new Date(`${entryDate}T00:00:00`);
-      state.todoSelectedDate = displayDate;
-
-      const picker = document.getElementById("todo-date-picker");
-      if (picker) {
-        picker.value = formatDateKey(displayDate);
-      }
-
-      const dueField = document.getElementById("todo-date");
-      if (dueField) {
-        dueField.value = formatDateKey(displayDate);
-      }
-
-      resetTodoForm();
-      renderTodoList();
     });
   }
 
@@ -2274,8 +2370,6 @@ function init() {
   state.events = loadEvents();
   state.categories = loadCategories();
   state.selectedCategories = new Set(getAllCategories().map((option) => option.value));
-  state.todos = loadTodos();
-  state.completedTodos = loadCompletedTodos();
   state.todoSelectedDate = new Date();
   setSelectedDate(new Date());
   state.weekStart = getStartOfWeek(new Date());
@@ -2289,6 +2383,15 @@ function init() {
   bindWeekPicker();
   bindTodoControls();
   render();
+  setTodoMessage("Loading tasks...");
+  loadTodos().then(() => {
+    advanceOverdueTodos();
+    renderTodoList();
+    setTodoMessage("");
+  }).catch((error) => {
+    console.error("Task loading failed:", error);
+    setTodoMessage("Could not load tasks. Please refresh and try again.", "error");
+  });
   loadSemesters().then(async () => {
     try {
       await loadClasses();

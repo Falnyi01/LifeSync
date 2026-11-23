@@ -190,6 +190,99 @@ function getPositiveId(value) {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+function getTaskDetails(body) {
+  const details = body && typeof body === "object" ? body : {};
+  const itemType = details.type;
+  const title = typeof details.title === "string" ? details.title.trim() : "";
+  const notes = typeof details.notes === "string" ? details.notes.trim() : "";
+  const taskDate = typeof details.taskDate === "string" ? details.taskDate : "";
+  const dueDate = typeof details.dueDate === "string" ? details.dueDate : "";
+  const dueTime = typeof details.dueTime === "string" ? details.dueTime : "";
+  const reminderDays = details.reminderDays === undefined ? 0 : Number(details.reminderDays);
+
+  if (itemType !== "task" && itemType !== "assignment") {
+    return { error: "Choose a personal task or assignment." };
+  }
+  if (!title || title.length > 100) {
+    return { error: "Enter a title of 1 to 100 characters." };
+  }
+  if (typeof details.notes !== "undefined" && typeof details.notes !== "string") {
+    return { error: "Notes must be text." };
+  }
+  if (notes.length > 500) {
+    return { error: "Notes must be 500 characters or fewer." };
+  }
+  if (!Number.isInteger(reminderDays) || reminderDays < 0 || reminderDays > 30) {
+    return { error: "Reminder days must be a whole number from 0 to 30." };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (itemType === "task") {
+    if (!isValidDateString(taskDate)) {
+      return { error: "Enter a valid task date." };
+    }
+    if (taskDate < today) {
+      return { error: "The selected date must be today or later." };
+    }
+
+    const maximumDate = new Date(`${today}T00:00:00.000Z`);
+    maximumDate.setUTCDate(maximumDate.getUTCDate() + 7);
+    if (taskDate > maximumDate.toISOString().slice(0, 10)) {
+      return { error: "Tasks can only be created for today or up to 7 days in the future." };
+    }
+
+    return {
+      itemType,
+      title,
+      notes,
+      taskDate,
+      dueDate: null,
+      dueTime: null,
+      reminderDays: 0,
+      reminderDate: null
+    };
+  }
+
+  if (!isValidDateString(dueDate) || dueDate < today) {
+    return { error: "Enter a valid assignment due date that is today or later." };
+  }
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dueTime)) {
+    return { error: "Enter a valid assignment due time." };
+  }
+
+  const reminderDate = new Date(`${dueDate}T00:00:00.000Z`);
+  reminderDate.setUTCDate(reminderDate.getUTCDate() - reminderDays);
+
+  return {
+    itemType,
+    title,
+    notes,
+    taskDate: null,
+    dueDate,
+    dueTime,
+    reminderDays,
+    reminderDate: reminderDate.toISOString().slice(0, 10)
+  };
+}
+
+function toTodoItem(task) {
+  const isAssignment = task.itemType === "assignment";
+
+  return {
+    id: task.id,
+    title: task.title,
+    notes: task.notes,
+    date: isAssignment ? task.reminderDate || task.dueDate : task.taskDate,
+    originalDate: null,
+    createdDate: isAssignment ? task.dueDate : task.taskDate,
+    isAssignment,
+    dueDate: isAssignment ? task.dueDate : "",
+    dueTime: isAssignment ? task.dueTime : "",
+    reminderDays: isAssignment ? task.reminderDays : 0,
+    reminderDate: isAssignment ? task.reminderDate : null
+  };
+}
+
 function findSemesterForUser(userId, semesterId) {
   return new Promise((resolve, reject) => {
     database.get(
@@ -471,6 +564,165 @@ app.delete("/api/semesters/:id", requireApiLogin, async (request, response) => {
   } catch (error) {
     console.error("Semester deletion failed:", error);
     return response.status(500).json({ message: "Unable to delete the semester right now." });
+  }
+});
+
+app.get("/api/tasks", requireApiLogin, async (request, response) => {
+  try {
+    const tasks = await new Promise((resolve, reject) => {
+      database.all(
+        `SELECT id, item_type AS itemType, title, notes,
+                task_date AS taskDate, due_date AS dueDate,
+                due_time AS dueTime, reminder_days AS reminderDays,
+                reminder_date AS reminderDate
+         FROM tasks
+         WHERE user_id = ?
+         ORDER BY COALESCE(task_date, reminder_date), id`,
+        [request.session.userId],
+        (error, rows) => error ? reject(error) : resolve(rows)
+      );
+    });
+
+    return response.json({
+      userId: request.session.userId,
+      tasks: tasks.map(toTodoItem)
+    });
+  } catch (error) {
+    console.error("Task list failed:", error);
+    return response.status(500).json({ message: "Unable to load tasks right now." });
+  }
+});
+
+app.post("/api/tasks", requireApiLogin, async (request, response) => {
+  const details = getTaskDetails(request.body);
+  if (details.error) {
+    return response.status(400).json({ message: details.error });
+  }
+
+  try {
+    const id = await new Promise((resolve, reject) => {
+      database.run(
+        `INSERT INTO tasks (
+          user_id, item_type, title, notes, task_date, due_date,
+          due_time, reminder_days, reminder_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          request.session.userId,
+          details.itemType,
+          details.title,
+          details.notes,
+          details.taskDate,
+          details.dueDate,
+          details.dueTime,
+          details.reminderDays,
+          details.reminderDate
+        ],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.lastID);
+        }
+      );
+    });
+
+    return response.status(201).json({
+      message: "Task saved successfully.",
+      task: toTodoItem({ id, ...details })
+    });
+  } catch (error) {
+    console.error("Task creation failed:", error);
+    return response.status(500).json({ message: "Unable to save the task right now." });
+  }
+});
+
+app.put("/api/tasks/:id", requireApiLogin, async (request, response) => {
+  const id = getPositiveId(request.params.id);
+  if (!id) {
+    return response.status(400).json({ message: "Enter a valid task ID." });
+  }
+
+  const details = getTaskDetails(request.body);
+  if (details.error) {
+    return response.status(400).json({ message: details.error });
+  }
+
+  try {
+    const changes = await new Promise((resolve, reject) => {
+      database.run(
+        `UPDATE tasks
+         SET item_type = ?, title = ?, notes = ?, task_date = ?, due_date = ?,
+             due_time = ?, reminder_days = ?, reminder_date = ?, updated_at = datetime('now')
+         WHERE id = ? AND user_id = ?`,
+        [
+          details.itemType,
+          details.title,
+          details.notes,
+          details.taskDate,
+          details.dueDate,
+          details.dueTime,
+          details.reminderDays,
+          details.reminderDate,
+          id,
+          request.session.userId
+        ],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.changes);
+        }
+      );
+    });
+
+    if (!changes) {
+      return response.status(404).json({ message: "Task not found." });
+    }
+
+    return response.json({
+      message: "Task updated successfully.",
+      task: toTodoItem({ id, ...details })
+    });
+  } catch (error) {
+    console.error("Task update failed:", error);
+    return response.status(500).json({ message: "Unable to update the task right now." });
+  }
+});
+
+app.delete("/api/tasks/:id", requireApiLogin, async (request, response) => {
+  const id = getPositiveId(request.params.id);
+  if (!id) {
+    return response.status(400).json({ message: "Enter a valid task ID." });
+  }
+
+  try {
+    const changes = await new Promise((resolve, reject) => {
+      database.run(
+        "DELETE FROM tasks WHERE id = ? AND user_id = ?",
+        [id, request.session.userId],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.changes);
+        }
+      );
+    });
+
+    if (!changes) {
+      return response.status(404).json({ message: "Task not found." });
+    }
+
+    return response.json({ message: "Task deleted successfully." });
+  } catch (error) {
+    console.error("Task deletion failed:", error);
+    return response.status(500).json({ message: "Unable to delete the task right now." });
   }
 });
 
