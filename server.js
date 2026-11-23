@@ -91,6 +91,8 @@ app.use(session({
 }));
 
 function requireLogin(request, response, next) {
+  response.set("Cache-Control", "no-store");
+
   if (!request.session.userId) {
     return response.redirect("/login.html");
   }
@@ -228,6 +230,18 @@ app.post("/api/login", async (request, response) => {
     console.error("Account login failed:", error);
     return response.status(500).json({ message: "Unable to log in right now." });
   }
+});
+
+app.post("/api/logout", (request, response) => {
+  request.session.destroy((error) => {
+    if (error) {
+      console.error("Session logout failed:", error);
+      return response.status(500).json({ message: "Unable to log out right now." });
+    }
+
+    response.clearCookie("connect.sid");
+    return response.json({ message: "Logout successful." });
+  });
 });
 
 app.use((error, request, response, next) => {

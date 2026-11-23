@@ -138,6 +138,58 @@ test("redirects signed-out visitors from the planner to login", async () => {
   }
 });
 
+test("requires a new login to access the planner after logout", async () => {
+  const email = `logout-${randomUUID()}@example.com`;
+  const password = "Password123";
+
+  const registration = await post("/api/register", {
+    name: "Logout Student",
+    email,
+    password
+  });
+  assert.equal(registration.status, 201);
+
+  const login = await post("/api/login", { email, password });
+  assert.equal(login.status, 200);
+  const sessionCookie = login.headers.get("set-cookie").split(";")[0];
+
+  for (const route of ["/", "/index.html"]) {
+    const response = await fetch(`${baseUrl}${route}`, {
+      headers: { Cookie: sessionCookie },
+      redirect: "manual"
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("cache-control"), /no-store/i);
+  }
+
+  const logout = await fetch(`${baseUrl}/api/logout`, {
+    method: "POST",
+    headers: { Cookie: sessionCookie }
+  });
+  assert.equal(logout.status, 200);
+  assert.match(logout.headers.get("set-cookie"), /^connect\.sid=;/);
+
+  for (const route of ["/", "/index.html"]) {
+    const response = await fetch(`${baseUrl}${route}`, {
+      headers: { Cookie: sessionCookie },
+      redirect: "manual"
+    });
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), "/login.html");
+  }
+
+  const relogin = await post("/api/login", { email, password });
+  assert.equal(relogin.status, 200);
+  const newSessionCookie = relogin.headers.get("set-cookie").split(";")[0];
+  assert.notEqual(newSessionCookie, sessionCookie);
+
+  const planner = await fetch(`${baseUrl}/`, {
+    headers: { Cookie: newSessionCookie },
+    redirect: "manual"
+  });
+  assert.equal(planner.status, 200);
+});
+
 test("rejects incorrect passwords and unknown accounts with the same message", async () => {
   const email = `wrong-password-${randomUUID()}@example.com`;
   const registration = await post("/api/register", {
