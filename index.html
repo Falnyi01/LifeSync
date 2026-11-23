@@ -23,6 +23,7 @@
         <button class="tab-button active" data-tab="calendar">Calendar</button>
         <button class="tab-button" data-tab="weekly">Weekly Schedule</button>
         <button class="tab-button" data-tab="todo">To-Do</button>
+        <button class="tab-button" data-tab="semester" type="button">Semesters</button>
       </nav>
 
       <main class="main-content">
@@ -194,6 +195,30 @@
           <div id="todo-completed-panel" class="todo-panel-content hidden">
             <h3 class="todo-list-heading">Completed Items</h3>
             <div id="completed-todo-list" class="todo-list"></div>
+          </div>
+        </section>
+
+        <section id="semester-panel" class="panel hidden">
+          <div class="semester-form-panel">
+            <h2>Create a Semester</h2>
+            <form id="semester-form" class="semester-form">
+              <div class="field-group">
+                <label for="semester-name">Semester name</label>
+                <input id="semester-name" name="name" type="text" required />
+              </div>
+
+              <div class="field-group">
+                <label for="semester-start-date">Start date</label>
+                <input id="semester-start-date" name="startDate" type="date" required />
+              </div>
+
+              <div class="field-group">
+                <label for="semester-end-date">End date</label>
+                <input id="semester-end-date" name="endDate" type="date" required />
+              </div>
+
+              <button type="submit" class="primary-button" disabled>Save Semester</button>
+            </form>
           </div>
         </section>
       </main>
