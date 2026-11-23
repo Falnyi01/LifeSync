@@ -18,6 +18,7 @@ function createTasksTable(callback) {
       due_time TEXT,
       reminder_days INTEGER NOT NULL DEFAULT 0 CHECK (reminder_days BETWEEN 0 AND 30),
       reminder_date TEXT,
+      class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -27,7 +28,29 @@ function createTasksTable(callback) {
         (item_type = 'assignment' AND task_date IS NULL AND due_date IS NOT NULL AND due_time IS NOT NULL)
       )
     )`,
-    callback
+    (error) => {
+      if (error) {
+        callback(error);
+        return;
+      }
+
+      database.all("PRAGMA table_info(tasks)", (error, columns) => {
+        if (error) {
+          callback(error);
+          return;
+        }
+
+        if (columns.some((column) => column.name === "class_id")) {
+          callback(null);
+          return;
+        }
+
+        database.run(
+          "ALTER TABLE tasks ADD COLUMN class_id INTEGER REFERENCES classes(id) ON DELETE SET NULL",
+          callback
+        );
+      });
+    }
   );
 }
 

@@ -71,6 +71,7 @@ const state = {
   todoView: "day",
   todoSelectedDate: new Date(),
   todoEditingId: null,
+  todoClassSelection: "",
   todoKind: "all",
   todos: [],
   completedTodos: [],
@@ -852,6 +853,7 @@ function render() {
   renderDayView();
   renderWeeklyPlanner();
   renderTodoList();
+  renderAssignmentClassOptions();
   renderClasses();
 
   const dateInput = document.getElementById("event-date");
@@ -1211,8 +1213,35 @@ function getTodoRequestBody(item) {
     taskDate: item.isAssignment ? "" : item.date,
     dueDate: item.isAssignment ? item.dueDate : "",
     dueTime: item.isAssignment ? item.dueTime : "",
-    reminderDays: item.isAssignment ? item.reminderDays : 0
+    reminderDays: item.isAssignment ? item.reminderDays : 0,
+    classId: item.isAssignment ? item.classId || null : null
   };
+}
+
+function renderAssignmentClassOptions() {
+  const select = document.getElementById("todo-class-id");
+  if (!select) return;
+
+  select.replaceChildren();
+  const noClassOption = document.createElement("option");
+  noClassOption.value = "";
+  noClassOption.textContent = "No class";
+  select.appendChild(noClassOption);
+
+  state.classes.forEach((classRecord) => {
+    const option = document.createElement("option");
+    option.value = String(classRecord.id);
+    const semester = state.semesters.find((item) => item.id === classRecord.semesterId);
+    option.textContent = semester
+      ? `${classRecord.name} (${semester.name})`
+      : classRecord.name;
+    select.appendChild(option);
+  });
+
+  select.value = state.todoClassSelection;
+  if (select.value !== state.todoClassSelection && state.classes.length > 0) {
+    state.todoClassSelection = "";
+  }
 }
 
 async function saveTodos(tasks = state.todos) {
@@ -1329,7 +1358,7 @@ function buildTodoMetaText(item) {
     const dueSummary = dueDateForDisplay
       ? `Due ${dueDateLabel}${dueText} · ${remainingDays !== null && remainingDays >= 0 ? `Due in ${remainingDays} day${remainingDays === 1 ? "" : "s"}` : remainingDays !== null ? `${Math.abs(remainingDays)} day${Math.abs(remainingDays) === 1 ? "" : "s"} overdue` : "Due date pending"}${reminderNote}`
       : `No due date set${reminderNote}`;
-    return dueSummary;
+    return item.className ? `${dueSummary} · ${item.className}` : dueSummary;
   }
 
   return `Due ${dateLabel}`;
@@ -1393,6 +1422,8 @@ function startEditTodo(todoId) {
   document.getElementById("todo-due-date").value = item.dueDate || "";
   document.getElementById("todo-due-time").value = item.dueTime || "";
   document.getElementById("todo-reminder-days").value = item.reminderDays || 3;
+  state.todoClassSelection = item.classId ? String(item.classId) : "";
+  renderAssignmentClassOptions();
   toggleAssignmentFields();
   document.getElementById("todo-cancel-edit").classList.remove("hidden");
 }
@@ -1406,6 +1437,8 @@ function resetTodoForm() {
   document.getElementById("todo-date").value = formatDateKey(state.todoSelectedDate);
   document.getElementById("todo-reminder-days").value = 3;
   state.todoEditingId = null;
+  state.todoClassSelection = "";
+  document.getElementById("todo-class-id").value = "";
   toggleAssignmentFields();
   document.getElementById("todo-cancel-edit").classList.add("hidden");
 }
@@ -1560,7 +1593,7 @@ function renderTodoList() {
 
           const completionMeta = document.createElement("span");
           completionMeta.className = "todo-item-meta";
-          completionMeta.textContent = `Completed on ${new Date(`${item.completedDate}T00:00:00`).toLocaleDateString()} · Original due ${new Date(`${item.date}T00:00:00`).toLocaleDateString()}`;
+          completionMeta.textContent = `Completed on ${new Date(`${item.completedDate}T00:00:00`).toLocaleDateString()} · Original due ${new Date(`${item.date}T00:00:00`).toLocaleDateString()}${item.className ? ` · ${item.className}` : ""}`;
           text.append(title, completionMeta);
           appendTodoNotes(text, item);
 
@@ -1673,6 +1706,7 @@ function bindTodoControls() {
   const todoDatePicker = document.getElementById("todo-date-picker");
   const todoKindSelect = document.getElementById("todo-kind-select");
   const todoType = document.getElementById("todo-type");
+  const todoClassSelect = document.getElementById("todo-class-id");
   const todoForm = document.getElementById("todo-form");
   const todoCancelEdit = document.getElementById("todo-cancel-edit");
 
@@ -1681,6 +1715,12 @@ function bindTodoControls() {
       toggleAssignmentFields();
     });
     toggleAssignmentFields();
+  }
+
+  if (todoClassSelect) {
+    todoClassSelect.addEventListener("change", () => {
+      state.todoClassSelection = todoClassSelect.value;
+    });
   }
 
   if (todoKindSelect) {
@@ -1741,6 +1781,7 @@ function bindTodoControls() {
       const notes = document.getElementById("todo-notes").value.trim();
       const dueDate = document.getElementById("todo-due-date").value;
       const dueTime = document.getElementById("todo-due-time").value;
+      const classId = Number(document.getElementById("todo-class-id").value) || null;
       const reminderDays = Number(document.getElementById("todo-reminder-days").value || 0);
       const isAssignment = itemType === "assignment";
       const entryDate = isAssignment ? dueDate : taskDate;
@@ -1783,7 +1824,8 @@ function bindTodoControls() {
         dueDate: isAssignment ? dueDate : "",
         dueTime: isAssignment ? dueTime : "",
         reminderDays: isAssignment ? reminderDays : 0,
-        reminderDate
+        reminderDate,
+        classId: isAssignment ? classId : null
       };
 
       const editingId = state.todoEditingId;
@@ -2148,6 +2190,16 @@ async function deleteClass(classRecord) {
     }
 
     state.classes = state.classes.filter((item) => item.id !== classRecord.id);
+    state.todos = state.todos.map((item) => item.classId === classRecord.id
+      ? { ...item, classId: null, className: "" }
+      : item);
+    state.completedTodos = state.completedTodos.map((item) => item.classId === classRecord.id
+      ? { ...item, classId: null, className: "" }
+      : item);
+    if (state.todoClassSelection === String(classRecord.id)) {
+      state.todoClassSelection = "";
+    }
+    saveCompletedTodos();
     state.classLoadError = null;
     if (state.editingClassId === classRecord.id) {
       resetClassForm();
@@ -2347,6 +2399,13 @@ function bindClassForm() {
         state.classes = state.classes.map((classRecord) =>
           classRecord.id === editingId ? result.class : classRecord
         );
+        state.todos = state.todos.map((item) => item.classId === editingId
+          ? { ...item, className: result.class.name }
+          : item);
+        state.completedTodos = state.completedTodos.map((item) => item.classId === editingId
+          ? { ...item, className: result.class.name }
+          : item);
+        saveCompletedTodos();
       }
       state.classLoadError = null;
       resetClassForm();

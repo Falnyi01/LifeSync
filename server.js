@@ -199,9 +199,17 @@ function getTaskDetails(body) {
   const dueDate = typeof details.dueDate === "string" ? details.dueDate : "";
   const dueTime = typeof details.dueTime === "string" ? details.dueTime : "";
   const reminderDays = details.reminderDays === undefined ? 0 : Number(details.reminderDays);
+  const hasClassId = details.classId !== undefined && details.classId !== null && details.classId !== "";
+  const classId = hasClassId ? getPositiveId(details.classId) : null;
 
   if (itemType !== "task" && itemType !== "assignment") {
     return { error: "Choose a personal task or assignment." };
+  }
+  if (hasClassId && !classId) {
+    return { error: "Choose a valid saved class." };
+  }
+  if (itemType === "task" && classId !== null) {
+    return { error: "Only assignments can be linked to a class." };
   }
   if (!title || title.length > 100) {
     return { error: "Enter a title of 1 to 100 characters." };
@@ -239,7 +247,8 @@ function getTaskDetails(body) {
       dueDate: null,
       dueTime: null,
       reminderDays: 0,
-      reminderDate: null
+      reminderDate: null,
+      classId: null
     };
   }
 
@@ -261,7 +270,8 @@ function getTaskDetails(body) {
     dueDate,
     dueTime,
     reminderDays,
-    reminderDate: reminderDate.toISOString().slice(0, 10)
+    reminderDate: reminderDate.toISOString().slice(0, 10),
+    classId
   };
 }
 
@@ -279,7 +289,9 @@ function toTodoItem(task) {
     dueDate: isAssignment ? task.dueDate : "",
     dueTime: isAssignment ? task.dueTime : "",
     reminderDays: isAssignment ? task.reminderDays : 0,
-    reminderDate: isAssignment ? task.reminderDate : null
+    reminderDate: isAssignment ? task.reminderDate : null,
+    classId: isAssignment ? task.classId : null,
+    className: isAssignment ? task.className || "" : ""
   };
 }
 
@@ -291,6 +303,16 @@ function findSemesterForUser(userId, semesterId) {
        WHERE id = ? AND user_id = ?`,
       [semesterId, userId],
       (error, semester) => error ? reject(error) : resolve(semester)
+    );
+  });
+}
+
+function findClassForUser(userId, classId) {
+  return new Promise((resolve, reject) => {
+    database.get(
+      "SELECT id, name FROM classes WHERE id = ? AND user_id = ?",
+      [classId, userId],
+      (error, classRecord) => error ? reject(error) : resolve(classRecord || null)
     );
   });
 }
@@ -571,13 +593,15 @@ app.get("/api/tasks", requireApiLogin, async (request, response) => {
   try {
     const tasks = await new Promise((resolve, reject) => {
       database.all(
-        `SELECT id, item_type AS itemType, title, notes,
-                task_date AS taskDate, due_date AS dueDate,
-                due_time AS dueTime, reminder_days AS reminderDays,
-                reminder_date AS reminderDate
-         FROM tasks
-         WHERE user_id = ?
-         ORDER BY COALESCE(task_date, reminder_date), id`,
+        `SELECT t.id, t.item_type AS itemType, t.title, t.notes,
+                t.task_date AS taskDate, t.due_date AS dueDate,
+                t.due_time AS dueTime, t.reminder_days AS reminderDays,
+                t.reminder_date AS reminderDate, t.class_id AS classId,
+                c.name AS className
+         FROM tasks t
+         LEFT JOIN classes c ON c.id = t.class_id AND c.user_id = t.user_id
+         WHERE t.user_id = ?
+         ORDER BY COALESCE(t.task_date, t.reminder_date), t.id`,
         [request.session.userId],
         (error, rows) => error ? reject(error) : resolve(rows)
       );
@@ -600,12 +624,19 @@ app.post("/api/tasks", requireApiLogin, async (request, response) => {
   }
 
   try {
+    const classRecord = details.classId === null
+      ? null
+      : await findClassForUser(request.session.userId, details.classId);
+    if (details.classId !== null && !classRecord) {
+      return response.status(404).json({ message: "Class not found." });
+    }
+
     const id = await new Promise((resolve, reject) => {
       database.run(
         `INSERT INTO tasks (
           user_id, item_type, title, notes, task_date, due_date,
-          due_time, reminder_days, reminder_date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          due_time, reminder_days, reminder_date, class_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           request.session.userId,
           details.itemType,
@@ -615,7 +646,8 @@ app.post("/api/tasks", requireApiLogin, async (request, response) => {
           details.dueDate,
           details.dueTime,
           details.reminderDays,
-          details.reminderDate
+          details.reminderDate,
+          details.classId
         ],
         function (error) {
           if (error) {
@@ -630,7 +662,7 @@ app.post("/api/tasks", requireApiLogin, async (request, response) => {
 
     return response.status(201).json({
       message: "Task saved successfully.",
-      task: toTodoItem({ id, ...details })
+      task: toTodoItem({ id, ...details, className: classRecord ? classRecord.name : "" })
     });
   } catch (error) {
     console.error("Task creation failed:", error);
@@ -650,11 +682,19 @@ app.put("/api/tasks/:id", requireApiLogin, async (request, response) => {
   }
 
   try {
+    const classRecord = details.classId === null
+      ? null
+      : await findClassForUser(request.session.userId, details.classId);
+    if (details.classId !== null && !classRecord) {
+      return response.status(404).json({ message: "Class not found." });
+    }
+
     const changes = await new Promise((resolve, reject) => {
       database.run(
         `UPDATE tasks
          SET item_type = ?, title = ?, notes = ?, task_date = ?, due_date = ?,
-             due_time = ?, reminder_days = ?, reminder_date = ?, updated_at = datetime('now')
+             due_time = ?, reminder_days = ?, reminder_date = ?, class_id = ?,
+             updated_at = datetime('now')
          WHERE id = ? AND user_id = ?`,
         [
           details.itemType,
@@ -665,6 +705,7 @@ app.put("/api/tasks/:id", requireApiLogin, async (request, response) => {
           details.dueTime,
           details.reminderDays,
           details.reminderDate,
+          details.classId,
           id,
           request.session.userId
         ],
@@ -685,7 +726,7 @@ app.put("/api/tasks/:id", requireApiLogin, async (request, response) => {
 
     return response.json({
       message: "Task updated successfully.",
-      task: toTodoItem({ id, ...details })
+      task: toTodoItem({ id, ...details, className: classRecord ? classRecord.name : "" })
     });
   } catch (error) {
     console.error("Task update failed:", error);

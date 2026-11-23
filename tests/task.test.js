@@ -101,6 +101,35 @@ async function createLoggedInUser() {
   return cookie.split(";")[0];
 }
 
+async function createSavedClass(cookie, name = "Biology 101") {
+  const semesterResponse = await send("/api/semesters", {
+    method: "POST",
+    cookie,
+    body: {
+      name: "Fall 2030",
+      startDate: "2030-08-25",
+      endDate: "2030-12-19"
+    }
+  });
+  assert.equal(semesterResponse.status, 201);
+  const { semester } = await semesterResponse.json();
+
+  const classResponse = await send("/api/classes", {
+    method: "POST",
+    cookie,
+    body: {
+      semesterId: semester.id,
+      name,
+      meetingDays: ["Monday", "Wednesday"],
+      startTime: "09:00",
+      endTime: "10:15",
+      location: "Science Hall 204"
+    }
+  });
+  assert.equal(classResponse.status, 201);
+  return (await classResponse.json()).class;
+}
+
 const personalTask = {
   type: "task",
   title: "Read chapter 4",
@@ -186,6 +215,63 @@ test("stores assignment due dates and reminder dates", async () => {
   assert.equal(task.dueTime, assignment.dueTime);
   assert.equal(task.reminderDays, assignment.reminderDays);
   assert.equal(task.date, expectedReminderDate.toISOString().slice(0, 10));
+});
+
+test("links assignments to saved classes and clears the link when a class is deleted", async () => {
+  const cookie = await createLoggedInUser();
+  const classRecord = await createSavedClass(cookie);
+  const createResponse = await send("/api/tasks", {
+    method: "POST",
+    cookie,
+    body: { ...assignment, classId: classRecord.id }
+  });
+
+  assert.equal(createResponse.status, 201);
+  const { task } = await createResponse.json();
+  assert.equal(task.classId, classRecord.id);
+  assert.equal(task.className, classRecord.name);
+
+  const secondClass = await createSavedClass(cookie, "Chemistry 101");
+  const updateResponse = await send(`/api/tasks/${task.id}`, {
+    method: "PUT",
+    cookie,
+    body: { ...assignment, classId: secondClass.id }
+  });
+  assert.equal(updateResponse.status, 200);
+  const updatedTask = (await updateResponse.json()).task;
+  assert.equal(updatedTask.classId, secondClass.id);
+  assert.equal(updatedTask.className, secondClass.name);
+
+  const deleteClassResponse = await send(`/api/classes/${secondClass.id}`, {
+    method: "DELETE",
+    cookie
+  });
+  assert.equal(deleteClassResponse.status, 200);
+
+  const listResponse = await send("/api/tasks", { cookie });
+  const list = await listResponse.json();
+  assert.equal(list.tasks[0].classId, null);
+  assert.equal(list.tasks[0].className, "");
+});
+
+test("rejects links to classes owned by another user and class links on personal tasks", async () => {
+  const ownerCookie = await createLoggedInUser();
+  const classRecord = await createSavedClass(ownerCookie);
+  const otherCookie = await createLoggedInUser();
+
+  const otherUserLink = await send("/api/tasks", {
+    method: "POST",
+    cookie: otherCookie,
+    body: { ...assignment, classId: classRecord.id }
+  });
+  assert.equal(otherUserLink.status, 404);
+
+  const personalTaskLink = await send("/api/tasks", {
+    method: "POST",
+    cookie: ownerCookie,
+    body: { ...personalTask, classId: classRecord.id }
+  });
+  assert.equal(personalTaskLink.status, 400);
 });
 
 test("validates task input and requires authentication", async () => {
