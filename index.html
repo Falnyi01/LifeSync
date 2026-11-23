@@ -235,7 +235,7 @@
 
         <section id="classes-panel" class="panel hidden">
           <div class="class-form-panel">
-            <h2>Add a Class</h2>
+            <h2 id="class-form-title">Add a Class</h2>
             <form id="class-form" class="class-form">
               <div class="field-group">
                 <label for="class-name">Class name</label>
@@ -276,10 +276,18 @@
                 <input id="class-location" name="location" type="text" placeholder="Building and room, or Online" required />
               </div>
 
-              <button id="class-submit-button" type="submit" class="primary-button" disabled>Add Class</button>
+              <div class="button-row">
+                <button id="class-submit-button" type="submit" class="primary-button" disabled>Add Class</button>
+                <button id="class-cancel-edit" type="button" class="secondary-button hidden">Cancel</button>
+              </div>
               <p id="class-form-message" class="auth-message" role="status" aria-live="polite"></p>
             </form>
           </div>
+
+          <section class="class-list-panel" aria-labelledby="class-list-heading">
+            <h2 id="class-list-heading">Saved Classes</h2>
+            <div id="class-list" class="class-list" role="list" aria-live="polite"></div>
+          </section>
         </section>
       </main>
     </div>

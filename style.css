@@ -313,7 +313,8 @@ input {
 .event-panel,
 .semester-form-panel,
 .semester-list-panel,
-.class-form-panel {
+.class-form-panel,
+.class-list-panel {
   margin-top: 20px;
   background: rgba(17, 24, 39, 0.92);
   border: 1px solid var(--border);
@@ -324,7 +325,8 @@ input {
 .event-panel h2,
 .semester-form-panel h2,
 .semester-list-panel h2,
-.class-form-panel h2 {
+.class-form-panel h2,
+.class-list-panel h2 {
   margin-top: 0;
 }
 
@@ -343,6 +345,15 @@ input {
 .semester-list {
   display: grid;
   gap: 10px;
+}
+
+.class-list {
+  display: grid;
+  gap: 10px;
+}
+
+.class-item {
+  align-items: flex-start;
 }
 
 .semester-item.selected {
