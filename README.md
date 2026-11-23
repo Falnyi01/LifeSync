@@ -45,7 +45,7 @@ This README will be updated as the project progresses.
 
 ### Semester & Class Management
 - [x] Create and manage semesters
-- [ ] Add and manage classes
+- [x] Add and manage classes
 - [ ] Generate class schedules
 
 ### Assignment & Task Tracking
