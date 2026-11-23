@@ -2,6 +2,7 @@ const STORAGE_KEY = "student-planner-events-v1";
 const CATEGORY_KEY = "student-planner-categories-v1";
 
 const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const fullDayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const monthNames = [
   "January",
   "February",
@@ -73,7 +74,9 @@ const state = {
   todos: [],
   completedTodos: [],
   semesters: [],
+  classes: [],
   selectedSemesterId: null,
+  classFormSemesterId: null,
   editingSemesterId: null,
   weeklyStartHour: 6,
   weeklyEndHour: 22
@@ -257,24 +260,68 @@ function renderPeriodLabel() {
 }
 
 function getEventsForDate(dateString) {
+  const classEvents = getClassEventsForDate(dateString);
   return state.events
     .filter((event) => event.date === dateString)
+    .concat(classEvents)
     .sort((a, b) => a.start.localeCompare(b.start));
+}
+
+function getClassEventsForDate(dateString) {
+  const date = new Date(`${dateString}T00:00:00`);
+  const weekday = fullDayNames[date.getDay()];
+
+  return state.classes
+    .filter((classRecord) =>
+      classRecord.semesterStartDate &&
+      classRecord.semesterEndDate &&
+      dateString >= classRecord.semesterStartDate &&
+      dateString <= classRecord.semesterEndDate &&
+      classRecord.meetingDays.includes(weekday)
+    )
+    .map((classRecord) => ({
+      id: `class-${classRecord.id}-${dateString}`,
+      classId: classRecord.id,
+      title: classRecord.name,
+      date: dateString,
+      start: classRecord.startTime,
+      end: classRecord.endTime,
+      category: "class",
+      color: getCategoryColor("class"),
+      location: classRecord.location
+    }));
+}
+
+function getEventsForRange(startDate, endDate) {
+  const events = state.events.filter((event) => event.date >= startDate && event.date <= endDate);
+  const date = new Date(`${startDate}T00:00:00`);
+  const finalDate = new Date(`${endDate}T00:00:00`);
+
+  while (date <= finalDate) {
+    events.push(...getClassEventsForDate(formatDateForInput(date)));
+    date.setDate(date.getDate() + 1);
+  }
+
+  return events.sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
 }
 
 function buildEventPill(event) {
   const styles = getEventDisplayStyles(event);
-  const pill = document.createElement("button");
-  pill.type = "button";
+  const pill = document.createElement(event.classId ? "span" : "button");
+  if (!event.classId) {
+    pill.type = "button";
+  }
   pill.className = "event-pill";
   pill.style.backgroundColor = styles.backgroundColor;
   pill.style.borderColor = styles.borderColor;
   pill.style.color = styles.color;
   pill.textContent = event.title;
-  pill.addEventListener("click", (eventClick) => {
-    eventClick.stopPropagation();
-    startEditEvent(event.id);
-  });
+  if (!event.classId) {
+    pill.addEventListener("click", (eventClick) => {
+      eventClick.stopPropagation();
+      startEditEvent(event.id);
+    });
+  }
   return pill;
 }
 
@@ -371,9 +418,8 @@ function renderWeekCalendar() {
     label.textContent = `${dayNames[date.getDay()]} ${date.getDate()}`;
     column.appendChild(label);
 
-    const matchingEvents = state.events
-      .filter((event) => event.date === dateKey && state.selectedCategories.has(event.category))
-      .sort((a, b) => a.start.localeCompare(b.start));
+    const matchingEvents = getEventsForDate(dateKey)
+      .filter((event) => state.selectedCategories.has(event.category));
 
     if (matchingEvents.length === 0) {
       const empty = document.createElement("p");
@@ -399,9 +445,7 @@ function renderDayView() {
   if (!dayContainer) return;
 
   const dateKey = formatDateForInput(state.selectedDate);
-  const matches = state.events
-    .filter((event) => event.date === dateKey)
-    .sort((a, b) => a.start.localeCompare(b.start));
+  const matches = getEventsForDate(dateKey);
 
   const content = document.createElement("div");
   content.className = "week-day-column";
@@ -444,6 +488,19 @@ function createEventCard(event) {
   const time = document.createElement("div");
   time.textContent = `${formatTime(event.start)} - ${formatTime(event.end)}`;
 
+  card.append(title, category, time);
+
+  if (event.location) {
+    const location = document.createElement("div");
+    location.textContent = event.location;
+    card.appendChild(location);
+  }
+
+  if (event.classId) {
+    card.classList.add("class-event");
+    return card;
+  }
+
   const actions = document.createElement("div");
   actions.className = "event-actions";
 
@@ -460,7 +517,7 @@ function createEventCard(event) {
   deleteButton.addEventListener("click", () => deleteEvent(event.id));
 
   actions.append(editButton, deleteButton);
-  card.append(title, category, time, actions);
+  card.appendChild(actions);
   return card;
 }
 
@@ -491,10 +548,8 @@ function getFilteredWeeklyEvents() {
   weekEndDate.setDate(state.weekStart.getDate() + 6);
   const weekEndKey = formatDateForInput(weekEndDate);
 
-  return state.events.filter((event) => {
-    const inRange = event.date >= weekStartKey && event.date <= weekEndKey;
-    return inRange && state.selectedCategories.has(event.category);
-  });
+  return getEventsForRange(weekStartKey, weekEndKey)
+    .filter((event) => state.selectedCategories.has(event.category));
 }
 
 function getExactDurationMinutes(startTime, endTime) {
@@ -654,15 +709,7 @@ function renderWeeklyPlanner() {
     weekDates.push(date);
   }
 
-  const selectedEvents = state.events.filter((event) => {
-    const weekStartKey = formatDateForInput(state.weekStart);
-    const weekEndDate = new Date(state.weekStart);
-    weekEndDate.setDate(state.weekStart.getDate() + 6);
-    const weekEndKey = formatDateForInput(weekEndDate);
-    const eventKey = event.date;
-    const inRange = eventKey >= weekStartKey && eventKey <= weekEndKey;
-    return inRange && state.selectedCategories.has(event.category);
-  });
+  const selectedEvents = getFilteredWeeklyEvents();
 
   schedule.innerHTML = "";
 
@@ -1685,6 +1732,7 @@ function renderSemesters() {
   const list = document.getElementById("semester-list");
   if (!list) return;
 
+  renderClassSemesterOptions();
   list.replaceChildren();
 
   if (state.semesters.length === 0) {
@@ -1725,6 +1773,7 @@ function renderSemesters() {
     selectButton.setAttribute("aria-label", isSelected ? `${semester.name} is selected` : `Select ${semester.name}`);
     selectButton.addEventListener("click", () => {
       state.selectedSemesterId = semester.id;
+      state.classFormSemesterId = semester.id;
       renderSemesters();
       setSemesterMessage(`${semester.name} selected.`, "success");
     });
@@ -1747,6 +1796,49 @@ function renderSemesters() {
   });
 }
 
+function renderClassSemesterOptions() {
+  const select = document.getElementById("class-semester");
+  const submitButton = document.getElementById("class-submit-button");
+  if (!select || !submitButton) return;
+
+  select.replaceChildren();
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.disabled = true;
+  placeholder.textContent = state.semesters.length
+    ? "Select a semester"
+    : "Create a semester first";
+  select.appendChild(placeholder);
+
+  state.semesters.forEach((semester) => {
+    const option = document.createElement("option");
+    option.value = String(semester.id);
+    option.textContent = semester.name;
+    select.appendChild(option);
+  });
+
+  const selectedSemesterExists = state.semesters.some(
+    (semester) => semester.id === state.classFormSemesterId
+  );
+  const defaultSemesterId = selectedSemesterExists
+    ? state.classFormSemesterId
+    : state.selectedSemesterId;
+  const defaultSemesterExists = state.semesters.some(
+    (semester) => semester.id === defaultSemesterId
+  );
+
+  if (defaultSemesterExists) {
+    select.value = String(defaultSemesterId);
+    state.classFormSemesterId = defaultSemesterId;
+  } else {
+    select.value = "";
+    state.classFormSemesterId = null;
+  }
+
+  submitButton.disabled = !select.value;
+}
+
 async function loadSemesters() {
   const response = await fetch("/api/semesters");
   const result = await response.json();
@@ -1763,6 +1855,20 @@ async function loadSemesters() {
     state.selectedSemesterId = state.semesters.length ? state.semesters[0].id : null;
   }
   renderSemesters();
+}
+
+async function loadClasses() {
+  const response = await fetch("/api/classes");
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(result.message || "Could not load classes.");
+  }
+  if (!Array.isArray(result.classes)) {
+    throw new Error("The server returned an invalid class list.");
+  }
+
+  state.classes = result.classes;
 }
 
 function resetSemesterForm() {
@@ -1801,13 +1907,22 @@ async function deleteSemester(semester) {
     }
 
     state.semesters = state.semesters.filter((item) => item.id !== semester.id);
+    state.classes = state.classes.map((item) =>
+      item.semesterId === semester.id
+        ? { ...item, semesterId: null, semesterStartDate: null, semesterEndDate: null }
+        : item
+    );
     if (state.selectedSemesterId === semester.id) {
       state.selectedSemesterId = state.semesters.length ? state.semesters[0].id : null;
+    }
+    if (state.classFormSemesterId === semester.id) {
+      state.classFormSemesterId = state.selectedSemesterId;
     }
     if (state.editingSemesterId === semester.id) {
       resetSemesterForm();
     }
     renderSemesters();
+    render();
     setSemesterMessage(result.message, "success");
   } catch (error) {
     console.error("Semester deletion failed:", error);
@@ -1858,13 +1973,26 @@ function bindSemesterForm() {
         state.semesters = state.semesters.map((item) =>
           item.id === editingId ? result.semester : item
         );
+        state.classes = state.classes.map((classRecord) =>
+          classRecord.semesterId === editingId
+            ? {
+                ...classRecord,
+                semesterStartDate: result.semester.startDate,
+                semesterEndDate: result.semester.endDate
+              }
+            : classRecord
+        );
       }
       state.semesters.sort((first, second) =>
         first.startDate.localeCompare(second.startDate) || first.id - second.id
       );
       state.selectedSemesterId = result.semester.id;
+      if (state.classFormSemesterId === null || editingId === null) {
+        state.classFormSemesterId = result.semester.id;
+      }
       resetSemesterForm();
       renderSemesters();
+      render();
       setSemesterMessage(result.message, "success");
     } catch (error) {
       console.error("Semester save failed:", error);
@@ -1884,7 +2012,13 @@ function bindClassForm() {
   const form = document.getElementById("class-form");
   const message = document.getElementById("class-form-message");
   const submitButton = document.getElementById("class-submit-button");
-  if (!form || !message || !submitButton) return;
+  const semesterSelect = document.getElementById("class-semester");
+  if (!form || !message || !submitButton || !semesterSelect) return;
+
+  semesterSelect.addEventListener("change", () => {
+    state.classFormSemesterId = Number(semesterSelect.value) || null;
+    submitButton.disabled = !state.classFormSemesterId;
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1894,6 +2028,7 @@ function bindClassForm() {
 
     const classDetails = {
       name: document.getElementById("class-name").value,
+      semesterId: Number(semesterSelect.value),
       meetingDays: Array.from(form.querySelectorAll('input[name="meetingDays"]:checked'))
         .map((day) => day.value),
       startTime: document.getElementById("class-start-time").value,
@@ -1915,7 +2050,10 @@ function bindClassForm() {
         return;
       }
 
+      state.classes.push(result.class);
       form.reset();
+      renderClassSemesterOptions();
+      render();
       message.textContent = result.message;
       message.className = "auth-message success";
     } catch (error) {
@@ -1947,7 +2085,19 @@ function init() {
   bindWeekPicker();
   bindTodoControls();
   render();
-  loadSemesters().catch((error) => {
+  loadSemesters().then(async () => {
+    try {
+      await loadClasses();
+    } catch (error) {
+      console.error("Class loading failed:", error);
+      const message = document.getElementById("class-form-message");
+      if (message) {
+        message.textContent = "Could not load classes. Please refresh and try again.";
+        message.className = "auth-message error";
+      }
+    }
+    render();
+  }).catch((error) => {
     console.error("Semester loading failed:", error);
     const list = document.getElementById("semester-list");
     if (list) {
