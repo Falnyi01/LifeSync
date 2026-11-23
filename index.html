@@ -242,6 +242,11 @@
                 <input id="class-name" name="name" type="text" required />
               </div>
 
+              <div class="field-group">
+                <label for="class-semester">Semester</label>
+                <select id="class-semester" name="semesterId" required></select>
+              </div>
+
               <fieldset class="meeting-days-fieldset">
                 <legend>Meeting days</legend>
                 <div class="meeting-days-options">
@@ -271,7 +276,7 @@
                 <input id="class-location" name="location" type="text" placeholder="Building and room, or Online" required />
               </div>
 
-              <button id="class-submit-button" type="submit" class="primary-button">Add Class</button>
+              <button id="class-submit-button" type="submit" class="primary-button" disabled>Add Class</button>
               <p id="class-form-message" class="auth-message" role="status" aria-live="polite"></p>
             </form>
           </div>
