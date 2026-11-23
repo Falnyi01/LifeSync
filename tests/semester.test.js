@@ -107,6 +107,16 @@ const semesterDetails = {
   endDate: "2026-12-18"
 };
 
+async function createSemester(cookie, details) {
+  const response = await send("/api/semesters", {
+    method: "POST",
+    cookie,
+    body: details
+  });
+  assert.equal(response.status, 201);
+  return (await response.json()).semester;
+}
+
 test("creates, updates, and deletes a semester for the signed-in user", async () => {
   const cookie = await createLoggedInUser();
   const createResponse = await send("/api/semesters", {
@@ -193,4 +203,34 @@ test("prevents users from editing or deleting another user's semester", async ()
     cookie: otherUserCookie
   });
   assert.equal(deleteResponse.status, 404);
+});
+
+test("lists saved semesters only for the signed-in user", async () => {
+  const ownerCookie = await createLoggedInUser();
+  const fallSemester = await createSemester(ownerCookie, semesterDetails);
+  const springSemester = await createSemester(ownerCookie, {
+    name: "Spring 2027",
+    startDate: "2027-01-11",
+    endDate: "2027-05-07"
+  });
+
+  const otherUserCookie = await createLoggedInUser();
+  const otherSemester = await createSemester(otherUserCookie, {
+    name: "Summer 2027",
+    startDate: "2027-06-01",
+    endDate: "2027-08-01"
+  });
+
+  const ownerListResponse = await send("/api/semesters", { cookie: ownerCookie });
+  assert.equal(ownerListResponse.status, 200);
+  const ownerList = await ownerListResponse.json();
+  assert.deepEqual(ownerList.semesters, [fallSemester, springSemester]);
+
+  const otherListResponse = await send("/api/semesters", { cookie: otherUserCookie });
+  assert.equal(otherListResponse.status, 200);
+  const otherList = await otherListResponse.json();
+  assert.deepEqual(otherList.semesters, [otherSemester]);
+
+  const unauthenticatedList = await send("/api/semesters");
+  assert.equal(unauthenticatedList.status, 401);
 });

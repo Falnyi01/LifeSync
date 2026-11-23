@@ -289,6 +289,26 @@ app.post("/api/logout", (request, response) => {
   });
 });
 
+app.get("/api/semesters", requireApiLogin, async (request, response) => {
+  try {
+    const semesters = await new Promise((resolve, reject) => {
+      database.all(
+        `SELECT id, name, start_date AS startDate, end_date AS endDate
+         FROM semesters
+         WHERE user_id = ?
+         ORDER BY start_date, id`,
+        [request.session.userId],
+        (error, rows) => error ? reject(error) : resolve(rows)
+      );
+    });
+
+    return response.json({ semesters });
+  } catch (error) {
+    console.error("Semester list failed:", error);
+    return response.status(500).json({ message: "Unable to load semesters right now." });
+  }
+});
+
 app.post("/api/semesters", requireApiLogin, async (request, response) => {
   const details = getSemesterDetails(request.body);
   if (details.error) {

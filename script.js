@@ -72,6 +72,9 @@ const state = {
   todoKind: "all",
   todos: [],
   completedTodos: [],
+  semesters: [],
+  selectedSemesterId: null,
+  editingSemesterId: null,
   weeklyStartHour: 6,
   weeklyEndHour: 22
 };
@@ -1656,48 +1659,219 @@ function bindLogoutButton() {
   });
 }
 
+function setSemesterMessage(text, status = "") {
+  const message = document.getElementById("semester-form-message");
+  if (!message) return;
+
+  message.textContent = text;
+  message.className = status ? `auth-message ${status}` : "auth-message";
+}
+
+function formatSemesterDate(dateString) {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  }).format(new Date(year, month - 1, day));
+}
+
+function renderSemesters() {
+  const list = document.getElementById("semester-list");
+  if (!list) return;
+
+  list.replaceChildren();
+
+  if (state.semesters.length === 0) {
+    const emptyMessage = document.createElement("p");
+    emptyMessage.className = "empty-week";
+    emptyMessage.textContent = "No semesters yet. Add one using the form above.";
+    list.appendChild(emptyMessage);
+    return;
+  }
+
+  state.semesters.forEach((semester) => {
+    const isSelected = semester.id === state.selectedSemesterId;
+    const item = document.createElement("article");
+    item.className = `todo-item semester-item${isSelected ? " selected" : ""}`;
+    item.setAttribute("role", "listitem");
+
+    const details = document.createElement("div");
+    details.className = "todo-item-text";
+
+    const name = document.createElement("span");
+    name.className = "todo-item-title";
+    name.textContent = semester.name;
+
+    const dates = document.createElement("span");
+    dates.className = "todo-item-meta";
+    dates.textContent = `${formatSemesterDate(semester.startDate)} - ${formatSemesterDate(semester.endDate)}`;
+    details.append(name, dates);
+
+    const actions = document.createElement("div");
+    actions.className = "todo-item-actions";
+
+    const selectButton = document.createElement("button");
+    selectButton.type = "button";
+    selectButton.className = "todo-button";
+    selectButton.textContent = isSelected ? "Selected" : "Select";
+    selectButton.disabled = isSelected;
+    selectButton.setAttribute("aria-pressed", String(isSelected));
+    selectButton.setAttribute("aria-label", isSelected ? `${semester.name} is selected` : `Select ${semester.name}`);
+    selectButton.addEventListener("click", () => {
+      state.selectedSemesterId = semester.id;
+      renderSemesters();
+      setSemesterMessage(`${semester.name} selected.`, "success");
+    });
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "todo-button";
+    editButton.textContent = "Edit";
+    editButton.addEventListener("click", () => startEditSemester(semester));
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "todo-button";
+    deleteButton.textContent = "Delete";
+    deleteButton.addEventListener("click", () => deleteSemester(semester));
+
+    actions.append(selectButton, editButton, deleteButton);
+    item.append(details, actions);
+    list.appendChild(item);
+  });
+}
+
+async function loadSemesters() {
+  const response = await fetch("/api/semesters");
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(result.message || "Could not load semesters.");
+  }
+  if (!Array.isArray(result.semesters)) {
+    throw new Error("The server returned an invalid semester list.");
+  }
+
+  state.semesters = result.semesters;
+  if (!state.semesters.some((semester) => semester.id === state.selectedSemesterId)) {
+    state.selectedSemesterId = state.semesters.length ? state.semesters[0].id : null;
+  }
+  renderSemesters();
+}
+
+function resetSemesterForm() {
+  const form = document.getElementById("semester-form");
+  if (!form) return;
+
+  form.reset();
+  state.editingSemesterId = null;
+  document.getElementById("semester-form-title").textContent = "Create a Semester";
+  document.getElementById("semester-submit-button").textContent = "Save Semester";
+  document.getElementById("semester-cancel-edit").classList.add("hidden");
+}
+
+function startEditSemester(semester) {
+  state.editingSemesterId = semester.id;
+  document.getElementById("semester-name").value = semester.name;
+  document.getElementById("semester-start-date").value = semester.startDate;
+  document.getElementById("semester-end-date").value = semester.endDate;
+  document.getElementById("semester-form-title").textContent = "Edit Semester";
+  document.getElementById("semester-submit-button").textContent = "Update Semester";
+  document.getElementById("semester-cancel-edit").classList.remove("hidden");
+  setSemesterMessage("", "");
+  document.getElementById("semester-name").focus();
+}
+
+async function deleteSemester(semester) {
+  if (!window.confirm(`Delete "${semester.name}"?`)) return;
+
+  try {
+    const response = await fetch(`/api/semesters/${semester.id}`, { method: "DELETE" });
+    const result = await response.json();
+
+    if (!response.ok) {
+      setSemesterMessage(result.message || "Could not delete the semester.", "error");
+      return;
+    }
+
+    state.semesters = state.semesters.filter((item) => item.id !== semester.id);
+    if (state.selectedSemesterId === semester.id) {
+      state.selectedSemesterId = state.semesters.length ? state.semesters[0].id : null;
+    }
+    if (state.editingSemesterId === semester.id) {
+      resetSemesterForm();
+    }
+    renderSemesters();
+    setSemesterMessage(result.message, "success");
+  } catch (error) {
+    console.error("Semester deletion failed:", error);
+    setSemesterMessage("Could not connect to LifeSync. Please try again.", "error");
+  }
+}
+
 function bindSemesterForm() {
   const form = document.getElementById("semester-form");
   const message = document.getElementById("semester-form-message");
   if (!form || !message) return;
 
-  const submitButton = form.querySelector('button[type="submit"]');
+  const submitButton = document.getElementById("semester-submit-button");
+  const cancelButton = document.getElementById("semester-cancel-edit");
+  if (!submitButton || !cancelButton) return;
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     submitButton.disabled = true;
-    message.textContent = "Saving semester...";
-    message.className = "auth-message";
+    setSemesterMessage(state.editingSemesterId === null ? "Saving semester..." : "Updating semester.");
 
     const semester = {
       name: document.getElementById("semester-name").value,
       startDate: document.getElementById("semester-start-date").value,
       endDate: document.getElementById("semester-end-date").value
     };
+    const editingId = state.editingSemesterId;
 
     try {
-      const response = await fetch("/api/semesters", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(semester)
-      });
+      const response = await fetch(
+        editingId === null ? "/api/semesters" : `/api/semesters/${editingId}`,
+        {
+          method: editingId === null ? "POST" : "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(semester)
+        }
+      );
       const result = await response.json();
 
       if (!response.ok) {
-        message.textContent = result.message || "Could not save the semester.";
-        message.className = "auth-message error";
+        setSemesterMessage(result.message || "Could not save the semester.", "error");
         return;
       }
 
-      form.reset();
-      message.textContent = result.message;
-      message.className = "auth-message success";
+      if (editingId === null) {
+        state.semesters.push(result.semester);
+      } else {
+        state.semesters = state.semesters.map((item) =>
+          item.id === editingId ? result.semester : item
+        );
+      }
+      state.semesters.sort((first, second) =>
+        first.startDate.localeCompare(second.startDate) || first.id - second.id
+      );
+      state.selectedSemesterId = result.semester.id;
+      resetSemesterForm();
+      renderSemesters();
+      setSemesterMessage(result.message, "success");
     } catch (error) {
       console.error("Semester save failed:", error);
-      message.textContent = "Could not connect to LifeSync. Please try again.";
-      message.className = "auth-message error";
+      setSemesterMessage("Could not connect to LifeSync. Please try again.", "error");
     } finally {
       submitButton.disabled = false;
     }
+  });
+
+  cancelButton.addEventListener("click", () => {
+    resetSemesterForm();
+    setSemesterMessage("", "");
   });
 }
 
@@ -1719,6 +1893,14 @@ function init() {
   bindWeekPicker();
   bindTodoControls();
   render();
+  loadSemesters().catch((error) => {
+    console.error("Semester loading failed:", error);
+    const list = document.getElementById("semester-list");
+    if (list) {
+      list.textContent = "Could not load semesters. Please refresh and try again.";
+    }
+    setSemesterMessage("Could not load semesters. Please refresh and try again.", "error");
+  });
 }
 
 init();
