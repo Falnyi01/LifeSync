@@ -1656,6 +1656,51 @@ function bindLogoutButton() {
   });
 }
 
+function bindSemesterForm() {
+  const form = document.getElementById("semester-form");
+  const message = document.getElementById("semester-form-message");
+  if (!form || !message) return;
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submitButton.disabled = true;
+    message.textContent = "Saving semester...";
+    message.className = "auth-message";
+
+    const semester = {
+      name: document.getElementById("semester-name").value,
+      startDate: document.getElementById("semester-start-date").value,
+      endDate: document.getElementById("semester-end-date").value
+    };
+
+    try {
+      const response = await fetch("/api/semesters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(semester)
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        message.textContent = result.message || "Could not save the semester.";
+        message.className = "auth-message error";
+        return;
+      }
+
+      form.reset();
+      message.textContent = result.message;
+      message.className = "auth-message success";
+    } catch (error) {
+      console.error("Semester save failed:", error);
+      message.textContent = "Could not connect to LifeSync. Please try again.";
+      message.className = "auth-message error";
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+}
+
 function init() {
   state.events = loadEvents();
   state.categories = loadCategories();
@@ -1668,6 +1713,7 @@ function init() {
   renderCurrentDateLabel();
   bindTabs();
   bindLogoutButton();
+  bindSemesterForm();
   bindCalendarControls();
   bindEventForm();
   bindWeekPicker();
