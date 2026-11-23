@@ -44,7 +44,7 @@ This README will be updated as the project progresses.
 - [x] User logout
 
 ### Semester & Class Management
-- [ ] Create and manage semesters
+- [x] Create and manage semesters
 - [ ] Add and manage classes
 - [ ] Generate class schedules
 
