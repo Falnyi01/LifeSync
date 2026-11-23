@@ -1880,6 +1880,54 @@ function bindSemesterForm() {
   });
 }
 
+function bindClassForm() {
+  const form = document.getElementById("class-form");
+  const message = document.getElementById("class-form-message");
+  const submitButton = document.getElementById("class-submit-button");
+  if (!form || !message || !submitButton) return;
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submitButton.disabled = true;
+    message.textContent = "Saving class...";
+    message.className = "auth-message";
+
+    const classDetails = {
+      name: document.getElementById("class-name").value,
+      meetingDays: Array.from(form.querySelectorAll('input[name="meetingDays"]:checked'))
+        .map((day) => day.value),
+      startTime: document.getElementById("class-start-time").value,
+      endTime: document.getElementById("class-end-time").value,
+      location: document.getElementById("class-location").value
+    };
+
+    try {
+      const response = await fetch("/api/classes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(classDetails)
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        message.textContent = result.message || "Could not save the class.";
+        message.className = "auth-message error";
+        return;
+      }
+
+      form.reset();
+      message.textContent = result.message;
+      message.className = "auth-message success";
+    } catch (error) {
+      console.error("Class save failed:", error);
+      message.textContent = "Could not connect to LifeSync. Please try again.";
+      message.className = "auth-message error";
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+}
+
 function init() {
   state.events = loadEvents();
   state.categories = loadCategories();
@@ -1893,6 +1941,7 @@ function init() {
   bindTabs();
   bindLogoutButton();
   bindSemesterForm();
+  bindClassForm();
   bindCalendarControls();
   bindEventForm();
   bindWeekPicker();

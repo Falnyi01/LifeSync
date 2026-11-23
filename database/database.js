@@ -45,7 +45,28 @@ function initializeDatabase() {
                   return;
                 }
 
-                resolve(database);
+                database.run(
+                  `CREATE TABLE IF NOT EXISTS classes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    meeting_days TEXT NOT NULL,
+                    start_time TEXT NOT NULL,
+                    end_time TEXT NOT NULL,
+                    location TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                  )`,
+                  (error) => {
+                    if (error) {
+                      reject(error);
+                      return;
+                    }
+
+                    resolve(database);
+                  }
+                );
               }
             );
           }
