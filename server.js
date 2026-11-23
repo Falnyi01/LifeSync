@@ -100,6 +100,51 @@ function requireLogin(request, response, next) {
   return next();
 }
 
+function requireApiLogin(request, response, next) {
+  response.set("Cache-Control", "no-store");
+
+  if (!request.session.userId) {
+    return response.status(401).json({ message: "Log in to manage semesters." });
+  }
+
+  return next();
+}
+
+function isValidDateString(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function getSemesterDetails(body) {
+  const details = body && typeof body === "object" ? body : {};
+  const name = typeof details.name === "string" ? details.name.trim() : "";
+  const startDate = typeof details.startDate === "string" ? details.startDate : "";
+  const endDate = typeof details.endDate === "string" ? details.endDate : "";
+
+  if (!name || name.length > 100) {
+    return { error: "Enter a semester name of 1 to 100 characters." };
+  }
+
+  if (!isValidDateString(startDate) || !isValidDateString(endDate)) {
+    return { error: "Enter valid start and end dates." };
+  }
+
+  if (startDate > endDate) {
+    return { error: "The end date must be on or after the start date." };
+  }
+
+  return { name, startDate, endDate };
+}
+
+function getSemesterId(value) {
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 app.get("/", requireLogin, (request, response) => {
   response.sendFile(path.join(__dirname, "index.html"));
 });
@@ -242,6 +287,134 @@ app.post("/api/logout", (request, response) => {
     response.clearCookie("connect.sid");
     return response.json({ message: "Logout successful." });
   });
+});
+
+app.get("/api/semesters", requireApiLogin, async (request, response) => {
+  try {
+    const semesters = await new Promise((resolve, reject) => {
+      database.all(
+        `SELECT id, name, start_date AS startDate, end_date AS endDate
+         FROM semesters
+         WHERE user_id = ?
+         ORDER BY start_date, id`,
+        [request.session.userId],
+        (error, rows) => error ? reject(error) : resolve(rows)
+      );
+    });
+
+    return response.json({ semesters });
+  } catch (error) {
+    console.error("Semester list failed:", error);
+    return response.status(500).json({ message: "Unable to load semesters right now." });
+  }
+});
+
+app.post("/api/semesters", requireApiLogin, async (request, response) => {
+  const details = getSemesterDetails(request.body);
+  if (details.error) {
+    return response.status(400).json({ message: details.error });
+  }
+
+  try {
+    const id = await new Promise((resolve, reject) => {
+      database.run(
+        "INSERT INTO semesters (user_id, name, start_date, end_date) VALUES (?, ?, ?, ?)",
+        [request.session.userId, details.name, details.startDate, details.endDate],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.lastID);
+        }
+      );
+    });
+
+    return response.status(201).json({
+      message: "Semester created successfully.",
+      semester: { id, name: details.name, startDate: details.startDate, endDate: details.endDate }
+    });
+  } catch (error) {
+    console.error("Semester creation failed:", error);
+    return response.status(500).json({ message: "Unable to save the semester right now." });
+  }
+});
+
+app.put("/api/semesters/:id", requireApiLogin, async (request, response) => {
+  const id = getSemesterId(request.params.id);
+  if (!id) {
+    return response.status(400).json({ message: "Enter a valid semester ID." });
+  }
+
+  const details = getSemesterDetails(request.body);
+  if (details.error) {
+    return response.status(400).json({ message: details.error });
+  }
+
+  try {
+    const changes = await new Promise((resolve, reject) => {
+      database.run(
+        `UPDATE semesters
+         SET name = ?, start_date = ?, end_date = ?, updated_at = datetime('now')
+         WHERE id = ? AND user_id = ?`,
+        [details.name, details.startDate, details.endDate, id, request.session.userId],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.changes);
+        }
+      );
+    });
+
+    if (!changes) {
+      return response.status(404).json({ message: "Semester not found." });
+    }
+
+    return response.json({
+      message: "Semester updated successfully.",
+      semester: { id, name: details.name, startDate: details.startDate, endDate: details.endDate }
+    });
+  } catch (error) {
+    console.error("Semester update failed:", error);
+    return response.status(500).json({ message: "Unable to update the semester right now." });
+  }
+});
+
+app.delete("/api/semesters/:id", requireApiLogin, async (request, response) => {
+  const id = getSemesterId(request.params.id);
+  if (!id) {
+    return response.status(400).json({ message: "Enter a valid semester ID." });
+  }
+
+  try {
+    const changes = await new Promise((resolve, reject) => {
+      database.run(
+        "DELETE FROM semesters WHERE id = ? AND user_id = ?",
+        [id, request.session.userId],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.changes);
+        }
+      );
+    });
+
+    if (!changes) {
+      return response.status(404).json({ message: "Semester not found." });
+    }
+
+    return response.json({ message: "Semester deleted successfully." });
+  } catch (error) {
+    console.error("Semester deletion failed:", error);
+    return response.status(500).json({ message: "Unable to delete the semester right now." });
+  }
 });
 
 app.use((error, request, response, next) => {

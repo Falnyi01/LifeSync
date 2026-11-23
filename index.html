@@ -23,6 +23,7 @@
         <button class="tab-button active" data-tab="calendar">Calendar</button>
         <button class="tab-button" data-tab="weekly">Weekly Schedule</button>
         <button class="tab-button" data-tab="todo">To-Do</button>
+        <button class="tab-button" data-tab="semester" type="button">Semesters</button>
       </nav>
 
       <main class="main-content">
@@ -195,6 +196,40 @@
             <h3 class="todo-list-heading">Completed Items</h3>
             <div id="completed-todo-list" class="todo-list"></div>
           </div>
+        </section>
+
+        <section id="semester-panel" class="panel hidden">
+          <div class="semester-form-panel">
+            <h2 id="semester-form-title">Create a Semester</h2>
+            <form id="semester-form" class="semester-form">
+              <div class="field-group">
+                <label for="semester-name">Semester name</label>
+                <input id="semester-name" name="name" type="text" required />
+              </div>
+
+              <div class="field-group">
+                <label for="semester-start-date">Start date</label>
+                <input id="semester-start-date" name="startDate" type="date" required />
+              </div>
+
+              <div class="field-group">
+                <label for="semester-end-date">End date</label>
+                <input id="semester-end-date" name="endDate" type="date" required />
+              </div>
+
+              <div class="button-row">
+                <button id="semester-submit-button" type="submit" class="primary-button">Save Semester</button>
+                <button id="semester-cancel-edit" type="button" class="secondary-button hidden">Cancel Edit</button>
+              </div>
+              <p id="semester-form-message" class="auth-message" role="status" aria-live="polite"></p>
+            </form>
+          </div>
+
+          <section class="semester-list-panel" aria-labelledby="semester-list-heading">
+            <h2 id="semester-list-heading">Saved Semesters</h2>
+            <p class="semester-list-intro">Select a semester to mark it as active.</p>
+            <div id="semester-list" class="semester-list" role="list" aria-live="polite"></div>
+          </section>
         </section>
       </main>
     </div>
