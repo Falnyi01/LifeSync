@@ -45,7 +45,52 @@ function initializeDatabase() {
                   return;
                 }
 
-                resolve(database);
+                database.run(
+                  `CREATE TABLE IF NOT EXISTS classes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    semester_id INTEGER,
+                    name TEXT NOT NULL,
+                    meeting_days TEXT NOT NULL,
+                    start_time TEXT NOT NULL,
+                    end_time TEXT NOT NULL,
+                    location TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (semester_id) REFERENCES semesters(id) ON DELETE SET NULL
+                  )`,
+                  (error) => {
+                    if (error) {
+                      reject(error);
+                      return;
+                    }
+
+                    database.all("PRAGMA table_info(classes)", (error, columns) => {
+                      if (error) {
+                        reject(error);
+                        return;
+                      }
+
+                      if (columns.some((column) => column.name === "semester_id")) {
+                        resolve(database);
+                        return;
+                      }
+
+                      database.run(
+                        "ALTER TABLE classes ADD COLUMN semester_id INTEGER REFERENCES semesters(id) ON DELETE SET NULL",
+                        (error) => {
+                          if (error) {
+                            reject(error);
+                            return;
+                          }
+
+                          resolve(database);
+                        }
+                      );
+                    });
+                  }
+                );
               }
             );
           }

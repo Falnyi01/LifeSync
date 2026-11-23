@@ -24,6 +24,7 @@
         <button class="tab-button" data-tab="weekly">Weekly Schedule</button>
         <button class="tab-button" data-tab="todo">To-Do</button>
         <button class="tab-button" data-tab="semester" type="button">Semesters</button>
+        <button class="tab-button" data-tab="classes" type="button">Classes</button>
       </nav>
 
       <main class="main-content">
@@ -229,6 +230,63 @@
             <h2 id="semester-list-heading">Saved Semesters</h2>
             <p class="semester-list-intro">Select a semester to mark it as active.</p>
             <div id="semester-list" class="semester-list" role="list" aria-live="polite"></div>
+          </section>
+        </section>
+
+        <section id="classes-panel" class="panel hidden">
+          <div class="class-form-panel">
+            <h2 id="class-form-title">Add a Class</h2>
+            <form id="class-form" class="class-form">
+              <div class="field-group">
+                <label for="class-name">Class name</label>
+                <input id="class-name" name="name" type="text" required />
+              </div>
+
+              <div class="field-group">
+                <label for="class-semester">Semester</label>
+                <select id="class-semester" name="semesterId" required></select>
+              </div>
+
+              <fieldset class="meeting-days-fieldset">
+                <legend>Meeting days</legend>
+                <div class="meeting-days-options">
+                  <label class="meeting-day-option"><input type="checkbox" name="meetingDays" value="Monday" /> Monday</label>
+                  <label class="meeting-day-option"><input type="checkbox" name="meetingDays" value="Tuesday" /> Tuesday</label>
+                  <label class="meeting-day-option"><input type="checkbox" name="meetingDays" value="Wednesday" /> Wednesday</label>
+                  <label class="meeting-day-option"><input type="checkbox" name="meetingDays" value="Thursday" /> Thursday</label>
+                  <label class="meeting-day-option"><input type="checkbox" name="meetingDays" value="Friday" /> Friday</label>
+                  <label class="meeting-day-option"><input type="checkbox" name="meetingDays" value="Saturday" /> Saturday</label>
+                  <label class="meeting-day-option"><input type="checkbox" name="meetingDays" value="Sunday" /> Sunday</label>
+                </div>
+              </fieldset>
+
+              <div class="time-row">
+                <div class="field-group">
+                  <label for="class-start-time">Start time</label>
+                  <input id="class-start-time" name="startTime" type="time" required />
+                </div>
+                <div class="field-group">
+                  <label for="class-end-time">End time</label>
+                  <input id="class-end-time" name="endTime" type="time" required />
+                </div>
+              </div>
+
+              <div class="field-group">
+                <label for="class-location">Location</label>
+                <input id="class-location" name="location" type="text" placeholder="Building and room, or Online" required />
+              </div>
+
+              <div class="button-row">
+                <button id="class-submit-button" type="submit" class="primary-button" disabled>Add Class</button>
+                <button id="class-cancel-edit" type="button" class="secondary-button hidden">Cancel</button>
+              </div>
+              <p id="class-form-message" class="auth-message" role="status" aria-live="polite"></p>
+            </form>
+          </div>
+
+          <section class="class-list-panel" aria-labelledby="class-list-heading">
+            <h2 id="class-list-heading">Saved Classes</h2>
+            <div id="class-list" class="class-list" role="list" aria-live="polite"></div>
           </section>
         </section>
       </main>

@@ -104,10 +104,55 @@ function requireApiLogin(request, response, next) {
   response.set("Cache-Control", "no-store");
 
   if (!request.session.userId) {
-    return response.status(401).json({ message: "Log in to manage semesters." });
+    return response.status(401).json({ message: "Log in to manage your planner." });
   }
 
   return next();
+}
+
+const classMeetingDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function getClassDetails(body) {
+  const details = body && typeof body === "object" ? body : {};
+  const name = typeof details.name === "string" ? details.name.trim() : "";
+  const location = typeof details.location === "string" ? details.location.trim() : "";
+  const meetingDays = Array.isArray(details.meetingDays) ? details.meetingDays : [];
+  const semesterId = getPositiveId(details.semesterId);
+  const startTime = typeof details.startTime === "string" ? details.startTime : "";
+  const endTime = typeof details.endTime === "string" ? details.endTime : "";
+
+  if (!name || name.length > 100) {
+    return { error: "Enter a class name of 1 to 100 characters." };
+  }
+
+  if (meetingDays.length === 0 || meetingDays.some((day) => !classMeetingDays.includes(day))) {
+    return { error: "Select at least one valid meeting day." };
+  }
+
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(startTime) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(endTime)) {
+    return { error: "Enter valid start and end times." };
+  }
+
+  if (startTime >= endTime) {
+    return { error: "End time must be later than start time." };
+  }
+
+  if (!location || location.length > 200) {
+    return { error: "Enter a location of 1 to 200 characters." };
+  }
+
+  if (!semesterId) {
+    return { error: "Select a semester for this class." };
+  }
+
+  return {
+    name,
+    meetingDays: classMeetingDays.filter((day) => meetingDays.includes(day)),
+    semesterId,
+    startTime,
+    endTime,
+    location
+  };
 }
 
 function isValidDateString(value) {
@@ -140,9 +185,21 @@ function getSemesterDetails(body) {
   return { name, startDate, endDate };
 }
 
-function getSemesterId(value) {
+function getPositiveId(value) {
   const id = Number(value);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function findSemesterForUser(userId, semesterId) {
+  return new Promise((resolve, reject) => {
+    database.get(
+      `SELECT id, start_date AS startDate, end_date AS endDate
+       FROM semesters
+       WHERE id = ? AND user_id = ?`,
+      [semesterId, userId],
+      (error, semester) => error ? reject(error) : resolve(semester)
+    );
+  });
 }
 
 app.get("/", requireLogin, (request, response) => {
@@ -342,7 +399,7 @@ app.post("/api/semesters", requireApiLogin, async (request, response) => {
 });
 
 app.put("/api/semesters/:id", requireApiLogin, async (request, response) => {
-  const id = getSemesterId(request.params.id);
+  const id = getPositiveId(request.params.id);
   if (!id) {
     return response.status(400).json({ message: "Enter a valid semester ID." });
   }
@@ -385,7 +442,7 @@ app.put("/api/semesters/:id", requireApiLogin, async (request, response) => {
 });
 
 app.delete("/api/semesters/:id", requireApiLogin, async (request, response) => {
-  const id = getSemesterId(request.params.id);
+  const id = getPositiveId(request.params.id);
   if (!id) {
     return response.status(400).json({ message: "Enter a valid semester ID." });
   }
@@ -414,6 +471,181 @@ app.delete("/api/semesters/:id", requireApiLogin, async (request, response) => {
   } catch (error) {
     console.error("Semester deletion failed:", error);
     return response.status(500).json({ message: "Unable to delete the semester right now." });
+  }
+});
+
+app.post("/api/classes", requireApiLogin, async (request, response) => {
+  const details = getClassDetails(request.body);
+  if (details.error) {
+    return response.status(400).json({ message: details.error });
+  }
+
+  try {
+    const semester = await findSemesterForUser(request.session.userId, details.semesterId);
+    if (!semester) {
+      return response.status(404).json({ message: "Semester not found." });
+    }
+
+    const id = await new Promise((resolve, reject) => {
+      database.run(
+        `INSERT INTO classes (user_id, semester_id, name, meeting_days, start_time, end_time, location)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          request.session.userId,
+          details.semesterId,
+          details.name,
+          JSON.stringify(details.meetingDays),
+          details.startTime,
+          details.endTime,
+          details.location
+        ],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.lastID);
+        }
+      );
+    });
+
+    return response.status(201).json({
+      message: "Class created successfully.",
+      class: {
+        id,
+        ...details,
+        semesterStartDate: semester.startDate,
+        semesterEndDate: semester.endDate
+      }
+    });
+  } catch (error) {
+    console.error("Class creation failed:", error);
+    return response.status(500).json({ message: "Unable to save the class right now." });
+  }
+});
+
+app.put("/api/classes/:id", requireApiLogin, async (request, response) => {
+  const id = getPositiveId(request.params.id);
+  if (!id) {
+    return response.status(400).json({ message: "Enter a valid class ID." });
+  }
+
+  const details = getClassDetails(request.body);
+  if (details.error) {
+    return response.status(400).json({ message: details.error });
+  }
+
+  try {
+    const semester = await findSemesterForUser(request.session.userId, details.semesterId);
+    if (!semester) {
+      return response.status(404).json({ message: "Semester not found." });
+    }
+
+    const changes = await new Promise((resolve, reject) => {
+      database.run(
+        `UPDATE classes
+         SET semester_id = ?, name = ?, meeting_days = ?, start_time = ?, end_time = ?, location = ?, updated_at = datetime('now')
+         WHERE id = ? AND user_id = ?`,
+        [
+          details.semesterId,
+          details.name,
+          JSON.stringify(details.meetingDays),
+          details.startTime,
+          details.endTime,
+          details.location,
+          id,
+          request.session.userId
+        ],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.changes);
+        }
+      );
+    });
+
+    if (!changes) {
+      return response.status(404).json({ message: "Class not found." });
+    }
+
+    return response.json({
+      message: "Class updated successfully.",
+      class: {
+        id,
+        ...details,
+        semesterStartDate: semester.startDate,
+        semesterEndDate: semester.endDate
+      }
+    });
+  } catch (error) {
+    console.error("Class update failed:", error);
+    return response.status(500).json({ message: "Unable to update the class right now." });
+  }
+});
+
+app.get("/api/classes", requireApiLogin, async (request, response) => {
+  try {
+    const rows = await new Promise((resolve, reject) => {
+      database.all(
+        `SELECT c.id, c.name, c.meeting_days AS meetingDays,
+                c.start_time AS startTime, c.end_time AS endTime,
+                c.location, c.semester_id AS semesterId,
+                s.start_date AS semesterStartDate, s.end_date AS semesterEndDate
+         FROM classes c
+         LEFT JOIN semesters s ON s.id = c.semester_id AND s.user_id = c.user_id
+         WHERE c.user_id = ?
+         ORDER BY s.start_date, c.name, c.id`,
+        [request.session.userId],
+        (error, results) => error ? reject(error) : resolve(results)
+      );
+    });
+
+    const classes = rows.map((classRecord) => ({
+      ...classRecord,
+      meetingDays: JSON.parse(classRecord.meetingDays)
+    }));
+
+    return response.json({ classes });
+  } catch (error) {
+    console.error("Class list failed:", error);
+    return response.status(500).json({ message: "Unable to load classes right now." });
+  }
+});
+
+app.delete("/api/classes/:id", requireApiLogin, async (request, response) => {
+  const id = getPositiveId(request.params.id);
+  if (!id) {
+    return response.status(400).json({ message: "Enter a valid class ID." });
+  }
+
+  try {
+    const changes = await new Promise((resolve, reject) => {
+      database.run(
+        "DELETE FROM classes WHERE id = ? AND user_id = ?",
+        [id, request.session.userId],
+        function (error) {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve(this.changes);
+        }
+      );
+    });
+
+    if (!changes) {
+      return response.status(404).json({ message: "Class not found." });
+    }
+
+    return response.json({ message: "Class deleted successfully." });
+  } catch (error) {
+    console.error("Class deletion failed:", error);
+    return response.status(500).json({ message: "Unable to delete the class right now." });
   }
 });
 
